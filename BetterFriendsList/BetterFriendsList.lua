@@ -5,9 +5,15 @@ end
 
 local friendLevel = Enum.BattleNetFriendLevel
 local tabs = {
+    { label = "All" },
     { label = "WoW Friends", levels = { [friendLevel.Title] = true } },
     { label = "Battle.net", levels = { [friendLevel.RealID] = true, [friendLevel.BattleTag] = true } },
-    { label = "All" },
+}
+
+local sections = {
+    { key = "forever", label = "WoW: Forever" },
+    { key = "wow", label = "In-Game WoW Friends" },
+    { key = "other", label = "Other" },
 }
 
 local factionAtlases = {
@@ -86,13 +92,9 @@ local function GetRowDetails(game)
 
     local friendRuleset = GetFriendRuleset(game)
     local playerRuleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
-    local rulesetText
-    if friendRuleset and playerRuleset then
-        local sameRuleset = friendRuleset == playerRuleset
-        rulesetText = ColorText(sameRuleset and "91e3ad" or "ffc579",
-            friendRuleset .. (sameRuleset and " (same)" or " (different)"))
-    else
-        rulesetText = friendRuleset or "Ruleset unknown"
+    local rulesetText = friendRuleset or "Ruleset unknown"
+    if friendRuleset and friendRuleset == playerRuleset then
+        rulesetText = ColorText("91e3ad", friendRuleset .. " (same)")
     end
 
     return (factionText or "Faction unknown") .. "  ·  " .. rulesetText
@@ -110,10 +112,10 @@ local function GetAccountName(account, game)
 end
 
 local function CollectFriends(tab, search)
-    local rows = {}
+    local groups = { forever = {}, wow = {}, other = {} }
     local total = BNGetNumFriends()
     if not IsReadable(total) or type(total) ~= "number" then
-        return rows
+        return groups
     end
 
     for index = 1, total do
@@ -128,35 +130,67 @@ local function CollectFriends(tab, search)
                 local battleTag = ReadText(account.battleTag)
                 if search == "" or name:lower():find(search, 1, true)
                     or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true) then
+                    local online = IsReadable(game.isOnline) and game.isOnline == true
+                    local isWoWFriend = IsReadable(level) and level == friendLevel.Title
+                    local isForever = online and ReadText(game.clientProgram) == BNET_CLIENT_WOW
+                        and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
+                    local key = isWoWFriend and "wow" or (isForever and "forever" or "other")
+                    local rows = groups[key]
                     rows[#rows + 1] = {
                         name = name,
+                        sortName = name:lower(),
                         character = character,
                         game = game,
-                        online = IsReadable(game.isOnline) and game.isOnline == true,
+                        online = online,
+                        isWoWFriend = isWoWFriend,
+                        away = (IsReadable(account.isAFK) and account.isAFK == true)
+                            or (IsReadable(game.isGameAFK) and game.isGameAFK == true),
+                        busy = (IsReadable(account.isDND) and account.isDND == true)
+                            or (IsReadable(game.isGameBusy) and game.isGameBusy == true),
                     }
                 end
             end
         end
     end
 
-    table.sort(rows, function(a, b)
-        if a.online ~= b.online then
-            return a.online
-        end
-        return a.name:lower() < b.name:lower()
-    end)
-    return rows
+    for _, rows in pairs(groups) do
+        table.sort(rows, function(a, b)
+            if a.online ~= b.online then
+                return a.online
+            end
+            return a.sortName < b.sortName
+        end)
+    end
+    return groups
 end
 
-local function CreateRow(parent, index)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetPoint("TOPLEFT", 0, -(index - 1) * 45)
-    row:SetPoint("TOPRIGHT", 0, -(index - 1) * 45)
-    row:SetHeight(42)
+local function PositionRow(frame, offset)
+    frame:ClearAllPoints()
+    frame:SetPoint("TOPLEFT", 0, -offset)
+    frame:SetPoint("TOPRIGHT", 0, -offset)
+end
 
-    local background = row:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints()
-    background:SetColorTexture(0.06, 0.11, 0.17, 0.9)
+local function CreateSectionHeader(parent)
+    local header = CreateFrame("Button", nil, parent)
+    header:SetHeight(24)
+    header:SetNormalAtlas("common-button-list-collapseExpand")
+    header:SetHighlightAtlas("common-button-list-collapseExpand")
+    header.label = header:CreateFontString(nil, "OVERLAY", "Game15Font_Shadow")
+    header.label:SetPoint("LEFT", 8, 0)
+    header.icon = header:CreateTexture(nil, "ARTWORK")
+    header.icon:SetPoint("RIGHT", -7, 0)
+    return header
+end
+
+local function CreateRow(parent)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetHeight(70)
+
+    row.background = row:CreateTexture(nil, "BACKGROUND")
+    row.background:SetAllPoints()
+    row.presence = row:CreateTexture(nil, "ARTWORK")
+    row.presence:SetSize(14, 14)
+    row.presence:SetPoint("CENTER", row, "TOPLEFT", 4, -4)
 
     row.gameIcon = row:CreateTexture(nil, "ARTWORK")
     row.gameIcon:SetSize(22, 22)
@@ -165,14 +199,20 @@ local function CreateRow(parent, index)
     row.crest:SetSize(19, 19)
     row.crest:SetPoint("RIGHT", row.gameIcon, "LEFT", -5, 0)
 
-    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    row.name:SetPoint("TOPLEFT", 9, -6)
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    row.name:SetPoint("TOPLEFT", 9, -10)
     row.name:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
     row.name:SetJustifyH("LEFT")
     row.name:SetWordWrap(false)
 
-    row.details = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    row.details:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -4)
+    row.character = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.character:SetPoint("TOPLEFT", 9, -32)
+    row.character:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
+    row.character:SetJustifyH("LEFT")
+    row.character:SetWordWrap(false)
+
+    row.details = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.details:SetPoint("TOPLEFT", 9, -51)
     row.details:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
     row.details:SetJustifyH("LEFT")
     row.details:SetWordWrap(false)
@@ -181,12 +221,33 @@ end
 
 local function DisplayFriend(row, friend)
     local game = friend.game
-    local name = friend.name
-    if friend.online and friend.character ~= "" and friend.character ~= name then
-        name = name .. "  ·  " .. friend.character
+    local background = friend.isWoWFriend and "friends-card-default" or "friends-card-battleNet"
+    row.background:SetAtlas(friend.online and background or "friends-card-disabled")
+    local presence = friend.away and "away" or (friend.busy and "busy" or "online")
+    row.presence:SetAtlas("friends-status-" .. (friend.online and presence or "offline"))
+    row.name:SetText(friend.name)
+    if friend.isWoWFriend then
+        row.name:SetTextColor(1, 1, 1)
+    else
+        row.name:SetTextColor(0.51, 0.77, 1)
     end
-    row.name:SetText(name)
     row.name:SetAlpha(friend.online and 1 or 0.55)
+
+    local character = friend.character
+    if friend.online and character ~= "" then
+        local level = game.characterLevel
+        if IsReadable(level) and type(level) == "number" and level > 0 then
+            character = character .. "  " .. ColorText("ffffff", "Lvl " .. level)
+        end
+        local className = ReadText(game.className)
+        if className ~= "" then
+            local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[ReadText(game.classFilename)]
+            character = character .. "  " .. (color and color:WrapTextInColorCode(className) or className)
+        end
+    else
+        character = ""
+    end
+    row.character:SetText(character)
 
     local details = GetRowDetails(game)
     local location = ReadText(game.areaName)
@@ -196,7 +257,16 @@ local function DisplayFriend(row, friend)
     if details and location ~= "" then
         details = details .. "  ·  " .. location
     end
-    row.details:SetText(friend.online and (details or location) or (FRIENDS_LIST_OFFLINE or "Offline"))
+    local status = friend.online and (details or location) or (FRIENDS_LIST_OFFLINE or "Offline")
+    if character == "" then
+        row.character:SetText(status)
+        row.details:SetText("")
+        row.character:SetTextColor(0.63, 0.65, 0.67)
+    else
+        row.character:SetTextColor(1, 0.82, 0)
+        row.details:SetText(status)
+    end
+    row.details:SetTextColor(0.63, 0.65, 0.67)
 
     local client = ReadText(game.clientProgram)
     local showIcon = friend.online and client ~= ""
@@ -223,7 +293,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     window:EnableMouse(true)
     window:EnableMouseWheel(true)
     window:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8x8" })
-    window:SetBackdropColor(0.025, 0.025, 0.035, 1)
+    window:SetBackdropColor(0.012, 0.012, 0.016, 1)
     window:Hide()
 
     local launcher = CreateFrame("Button", nil, socialFrame, "UIPanelButtonTemplate")
@@ -243,6 +313,12 @@ local function CreateFriendsView(socialFrame, nativeView)
     placeholder:SetPoint("LEFT", 2, 0)
     placeholder:SetText(SEARCH or "Search")
 
+    local divider = window:CreateTexture(nil, "BORDER")
+    divider:SetAtlas("perks-divider-short")
+    divider:SetPoint("TOPLEFT", 5, -75)
+    divider:SetPoint("TOPRIGHT", -5, -75)
+    divider:SetHeight(3)
+
     local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 14, -79)
     scroll:SetPoint("BOTTOMRIGHT", -31, 15)
@@ -259,7 +335,8 @@ local function CreateFriendsView(socialFrame, nativeView)
     empty:SetText("No friends to display.")
 
     local activeTab = 1
-    local rows, buttons = {}, {}
+    local rows, buttons, headers = {}, {}, {}
+    local collapsed = {}
     local showingBlizzard = false
     local function UpdateVisibility()
         local friendsVisible = nativeView:IsVisible() and not C_SocialRestrictions.IsFriendsDisabled()
@@ -267,23 +344,67 @@ local function CreateFriendsView(socialFrame, nativeView)
         launcher:SetShown(friendsVisible and showingBlizzard)
     end
 
-    local function Refresh()
-        local query = search:GetText():lower():match("^%s*(.-)%s*$")
-        local friends = CollectFriends(tabs[activeTab], query)
-        for index, friend in ipairs(friends) do
-            rows[index] = rows[index] or CreateRow(content, index)
-            DisplayFriend(rows[index], friend)
+    local function Render(groups)
+        local rowIndex, offset = 0, 7
+        local hasFriends = false
+        for _, section in ipairs(sections) do
+            local friends = groups[section.key]
+            local header = headers[section.key]
+            header:SetShown(#friends > 0)
+            if #friends > 0 then
+                hasFriends = true
+                local online = 0
+                for _, friend in ipairs(friends) do
+                    if friend.online then
+                        online = online + 1
+                    end
+                end
+                header.label:SetText(("%s  %d/%d"):format(section.label, online, #friends))
+                local isCollapsed = collapsed[section.key]
+                header.icon:SetAtlas(isCollapsed and "common-button-list-plus" or "common-button-list-minus", true)
+                PositionRow(header, offset)
+                offset = offset + 30
+                if not isCollapsed then
+                    for _, friend in ipairs(friends) do
+                        rowIndex = rowIndex + 1
+                        local row = rows[rowIndex] or CreateRow(content)
+                        rows[rowIndex] = row
+                        PositionRow(row, offset)
+                        DisplayFriend(row, friend)
+                        offset = offset + 73
+                    end
+                end
+            end
         end
-        for index = #friends + 1, #rows do
+        for index = rowIndex + 1, #rows do
             rows[index]:Hide()
         end
-        content:SetHeight(math.max(#friends * 45, 1))
-        empty:SetShown(#friends == 0)
+        content:SetHeight(offset)
+        empty:SetShown(not hasFriends)
+    end
+
+    local groups
+    local function Refresh()
+        local query = search:GetText():lower():match("^%s*(.-)%s*$")
+        groups = CollectFriends(tabs[activeTab], query)
+        Render(groups)
+    end
+
+    for _, section in ipairs(sections) do
+        local key = section.key
+        local header = CreateSectionHeader(content)
+        header:Hide()
+        header:SetScript("OnClick", function()
+            collapsed[key] = not collapsed[key]
+            Render(groups)
+            scroll.ScrollBar:SetValue(math.min(scroll.ScrollBar:GetValue(), scroll:GetVerticalScrollRange()))
+        end)
+        headers[key] = header
     end
 
     for index, tab in ipairs(tabs) do
         local button = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        button:SetSize(index == 3 and 56 or 101, 24)
+        button:SetSize(index == 1 and 56 or 101, 24)
         if index == 1 then
             button:SetPoint("TOPLEFT", 13, -11)
         else
