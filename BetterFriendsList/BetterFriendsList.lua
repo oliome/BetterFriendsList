@@ -94,6 +94,10 @@ local function GetFriendRuleset(game)
     return ParseRealmRuleset(label) or ParseRealmRuleset(presence:match(".* %- (.+)$"), true)
 end
 
+local function GetPlayerRuleset()
+    return ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
+end
+
 local function ColorText(color, text)
     return "|cff" .. color .. text .. "|r"
 end
@@ -474,6 +478,13 @@ local function CreateFriendsView(socialFrame, nativeView)
 
     local rows, headers = {}, {}
     local collapsed = {}
+    local function IsSectionCollapsed(key, playerRuleset)
+        if collapsed[key] ~= nil then
+            return collapsed[key]
+        end
+        return key ~= wowSection.key and key ~= playerRuleset
+    end
+
     local filters = { status = {}, tags = {} }
     local showingBlizzard = false
     local function UpdateVisibility()
@@ -485,7 +496,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     local function Render(groups)
         local rowIndex, offset = 0, 3
         local hasFriends = false
-        local playerRuleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
+        local playerRuleset = GetPlayerRuleset()
         for _, section in ipairs(GetSectionOrder(playerRuleset)) do
             local friends = groups[section.key]
             local header = headers[section.key]
@@ -499,7 +510,7 @@ local function CreateFriendsView(socialFrame, nativeView)
                     end
                 end
                 header.label:SetText(("%s  %d/%d"):format(section.label, online, #friends))
-                local isCollapsed = collapsed[section.key]
+                local isCollapsed = IsSectionCollapsed(section.key, playerRuleset)
                 header.icon:SetAtlas(isCollapsed and "common-button-list-plus" or "common-button-list-minus", true)
                 PositionRow(header, offset)
                 offset = offset + 30
@@ -534,7 +545,7 @@ local function CreateFriendsView(socialFrame, nativeView)
         local header = CreateSectionHeader(content)
         header:Hide()
         header:SetScript("OnClick", function()
-            collapsed[key] = not collapsed[key]
+            collapsed[key] = not IsSectionCollapsed(key, GetPlayerRuleset())
             Render(groups)
         end)
         headers[key] = header
