@@ -11,9 +11,22 @@ local tabs = {
 }
 
 local sections = {
-    { key = "forever", label = "WoW: Forever" },
+    { key = "Normal", label = "WoW: Forever — Normal" },
+    { key = "PvP", label = "WoW: Forever — PvP" },
+    { key = "RP", label = "WoW: Forever — RP" },
+    { key = "RP-PvP", label = "WoW: Forever — RP-PvP" },
+    { key = "unknown", label = "WoW: Forever — Unknown Ruleset" },
     { key = "wow", label = "In-Game WoW Friends" },
     { key = "other", label = "Other" },
+}
+
+local statusFilters = {
+    { key = "online", label = SOCIAL_UI_PRESENCE_TYPE_LABEL_ONLINE or "Online" },
+    { key = "away", label = SOCIAL_UI_PRESENCE_TYPE_LABEL_AWAY or "Away" },
+    { key = "busy", label = SOCIAL_UI_PRESENCE_TYPE_LABEL_BUSY or "Busy" },
+    { key = "offline", label = SOCIAL_UI_PRESENCE_TYPE_LABEL_OFFLINE or "Offline" },
+    { key = "queued", label = SOCIAL_UI_FRIENDS_LIST_IN_QUEUE_FILTER_LABEL or "In Queue" },
+    { key = "joinable", label = SOCIAL_UI_FRIENDS_LIST_AVAILABLE_FOR_QUEUE_FILTER_LABEL or "Available for Queue" },
 }
 
 local factionAtlases = {
@@ -72,7 +85,7 @@ local function ColorText(color, text)
     return "|cff" .. color .. text .. "|r"
 end
 
-local function GetRowDetails(game)
+local function GetRowDetails(game, friendRuleset, playerRuleset)
     if not IsReadableTable(game) or not IsReadable(game.isOnline) or not game.isOnline
         or ReadText(game.clientProgram) ~= BNET_CLIENT_WOW then
         return nil
@@ -90,8 +103,6 @@ local function GetRowDetails(game)
         return factionText
     end
 
-    local friendRuleset = GetFriendRuleset(game)
-    local playerRuleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
     local rulesetText = friendRuleset or "Ruleset unknown"
     if friendRuleset and friendRuleset == playerRuleset then
         rulesetText = ColorText("91e3ad", friendRuleset .. " (same)")
@@ -111,8 +122,46 @@ local function GetAccountName(account, game)
     return name ~= "" and name or (UNKNOWN or "Unknown")
 end
 
-local function CollectFriends(tab, search)
-    local groups = { forever = {}, wow = {}, other = {} }
+local function MatchesStatus(filters, friend)
+    if not next(filters) then
+        return true
+    end
+    if (filters.offline and not friend.online) or (friend.online
+        and (filters.online or (filters.away and friend.away) or (filters.busy and friend.busy))) then
+        return true
+    end
+    if not friend.online or not (filters.queued or filters.joinable) or not C_SocialQueue.IsSystemSupported() then
+        return false
+    end
+    local guid = ReadText(friend.game.playerGuid)
+    local group = guid ~= "" and C_SocialQueue.GetGroupForPlayer(guid)
+    if not IsReadable(group) or not group then
+        return false
+    end
+    local canJoin, numQueues = C_SocialQueue.GetGroupInfo(group)
+    return IsReadable(numQueues) and type(numQueues) == "number" and numQueues > 0
+        and (filters.queued or (filters.joinable and IsReadable(canJoin) and canJoin))
+end
+
+local function MatchesTags(filters, tags)
+    if not next(filters) then
+        return true
+    end
+    if IsReadableTable(tags) then
+        for _, tag in ipairs(tags) do
+            if IsReadable(tag) and filters[tag] then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function CollectFriends(tab, search, filters)
+    local groups = {}
+    for _, section in ipairs(sections) do
+        groups[section.key] = {}
+    end
     local total = BNGetNumFriends()
     if not IsReadable(total) or type(total) ~= "number" then
         return groups
@@ -128,26 +177,32 @@ local function CollectFriends(tab, search)
                 local name = GetAccountName(account, game)
                 local character = ReadText(game.characterName)
                 local battleTag = ReadText(account.battleTag)
-                if search == "" or name:lower():find(search, 1, true)
-                    or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true) then
+                if (search == "" or name:lower():find(search, 1, true)
+                    or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true))
+                    and MatchesTags(filters.tags, account.friendTags) then
                     local online = IsReadable(game.isOnline) and game.isOnline == true
                     local isWoWFriend = IsReadable(level) and level == friendLevel.Title
                     local isForever = online and ReadText(game.clientProgram) == BNET_CLIENT_WOW
                         and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
-                    local key = isWoWFriend and "wow" or (isForever and "forever" or "other")
-                    local rows = groups[key]
-                    rows[#rows + 1] = {
+                    local ruleset = isForever and GetFriendRuleset(game) or nil
+                    local friend = {
                         name = name,
                         sortName = name:lower(),
                         character = character,
                         game = game,
                         online = online,
                         isWoWFriend = isWoWFriend,
+                        ruleset = ruleset,
                         away = (IsReadable(account.isAFK) and account.isAFK == true)
                             or (IsReadable(game.isGameAFK) and game.isGameAFK == true),
                         busy = (IsReadable(account.isDND) and account.isDND == true)
                             or (IsReadable(game.isGameBusy) and game.isGameBusy == true),
                     }
+                    if MatchesStatus(filters.status, friend) then
+                        local key = isWoWFriend and "wow" or (isForever and (ruleset or "unknown") or "other")
+                        local rows = groups[key]
+                        rows[#rows + 1] = friend
+                    end
                 end
             end
         end
@@ -219,7 +274,7 @@ local function CreateRow(parent)
     return row
 end
 
-local function DisplayFriend(row, friend)
+local function DisplayFriend(row, friend, playerRuleset)
     local game = friend.game
     local background = friend.isWoWFriend and "friends-card-default" or "friends-card-battleNet"
     row.background:SetAtlas(friend.online and background or "friends-card-disabled")
@@ -249,7 +304,7 @@ local function DisplayFriend(row, friend)
     end
     row.character:SetText(character)
 
-    local details = GetRowDetails(game)
+    local details = GetRowDetails(game, friend.ruleset, playerRuleset)
     local location = ReadText(game.areaName)
     if location == "" and not details then
         location = ReadText(game.richPresence)
@@ -286,6 +341,44 @@ local function DisplayFriend(row, friend)
     row:Show()
 end
 
+local function SetupFilterMenu(filter, filters, refresh)
+    local function IsSelected(option)
+        return option.values[option.key] == true
+    end
+    local function Toggle(option)
+        local values, key = option.values, option.key
+        if values[key] then
+            values[key] = nil
+        else
+            values[key] = true
+        end
+        refresh()
+    end
+    local function AddTags(menu, title, tags)
+        menu:CreateTitle(title)
+        for _, tag in ipairs(tags) do
+            menu:CreateCheckbox(SocialUIUtil.GetLabelForBattleNetFriendTag(tag), IsSelected, Toggle,
+                { values = filters.tags, key = tag })
+        end
+    end
+
+    function filter:GenerateFilterMenu(root)
+        local statusMenu = root:CreateButton(SOCIAL_FILTER_DROPDOWN_STATUS or "Status")
+        for _, option in ipairs(statusFilters) do
+            statusMenu:CreateCheckbox(option.label, IsSelected, Toggle, { values = filters.status, key = option.key })
+        end
+
+        if C_BattleNet.AreFriendTagsEnabled() then
+            local tagsMenu = root:CreateButton(SOCIAL_FILTER_DROPDOWN_TAGS or "Tags")
+            AddTags(tagsMenu, SOCIAL_UI_BATTLE_NET_FRIEND_TAG_LABEL_INTERESTS or "Interests",
+                SocialUIUtil.GetSupportedBattleNetFriendTagInterestsForCurrentGameType())
+            tagsMenu:CreateDivider()
+            AddTags(tagsMenu, SOCIAL_UI_BATTLE_NET_FRIEND_TAG_ROLES_LABEL or "Roles",
+                SocialUIUtil.GetSupportedBattleNetFriendTagRolesForCurrentGameType())
+        end
+    end
+end
+
 local function CreateFriendsView(socialFrame, nativeView)
     local window = CreateFrame("Frame", nil, socialFrame, "BackdropTemplate")
     window:SetAllPoints(nativeView)
@@ -303,15 +396,14 @@ local function CreateFriendsView(socialFrame, nativeView)
     launcher:SetText("Better Friends")
     launcher:Hide()
 
-    local search = CreateFrame("EditBox", nil, window, "InputBoxTemplate")
-    search:SetPoint("TOPLEFT", 20, -47)
-    search:SetPoint("TOPRIGHT", -16, -47)
-    search:SetHeight(22)
+    local filter = CreateFrame("DropdownButton", nil, window, "SocialUISearchFilterDropdownTemplate")
+    filter:SetPoint("TOPRIGHT", -13, -41)
+    filter:SetSize(126, 30)
+    local search = CreateFrame("EditBox", nil, window, "SocialUISearchBoxTemplate")
+    search:SetPoint("TOPLEFT", 15, -46)
+    search:SetPoint("RIGHT", filter, "LEFT", -16, 0)
+    search:SetHeight(20)
     search:SetAutoFocus(false)
-    search:SetScript("OnEscapePressed", search.ClearFocus)
-    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisable")
-    placeholder:SetPoint("LEFT", 2, 0)
-    placeholder:SetText(SEARCH or "Search")
 
     local divider = window:CreateTexture(nil, "BORDER")
     divider:SetAtlas("perks-divider-short")
@@ -319,9 +411,20 @@ local function CreateFriendsView(socialFrame, nativeView)
     divider:SetPoint("TOPRIGHT", -5, -75)
     divider:SetHeight(3)
 
+    local addFriend = CreateFrame("Button", nil, window, "SocialUIActionButtonTemplate")
+    Mixin(addFriend, SocialUIAddFriendButtonMixin)
+    addFriend:SetPoint("BOTTOM", 0, 12)
+    addFriend:SetSize(160, 30)
+    addFriend:SetText(SOCIAL_UI_FRIENDS_LIST_ADD_FRIEND_BUTTON_LABEL or "Add New Friend")
+    local footer = window:CreateTexture(nil, "BORDER")
+    footer:SetAtlas("perks-divider-short")
+    footer:SetPoint("BOTTOMLEFT", 5, 52)
+    footer:SetPoint("BOTTOMRIGHT", -5, 52)
+    footer:SetHeight(3)
+
     local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", 14, -79)
-    scroll:SetPoint("BOTTOMRIGHT", -31, 15)
+    scroll:SetPoint("BOTTOMRIGHT", -31, 56)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(1, 1)
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -337,6 +440,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     local activeTab = 1
     local rows, buttons, headers = {}, {}, {}
     local collapsed = {}
+    local filters = { status = {}, tags = {} }
     local showingBlizzard = false
     local function UpdateVisibility()
         local friendsVisible = nativeView:IsVisible() and not C_SocialRestrictions.IsFriendsDisabled()
@@ -347,6 +451,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     local function Render(groups)
         local rowIndex, offset = 0, 7
         local hasFriends = false
+        local playerRuleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
         for _, section in ipairs(sections) do
             local friends = groups[section.key]
             local header = headers[section.key]
@@ -370,7 +475,7 @@ local function CreateFriendsView(socialFrame, nativeView)
                         local row = rows[rowIndex] or CreateRow(content)
                         rows[rowIndex] = row
                         PositionRow(row, offset)
-                        DisplayFriend(row, friend)
+                        DisplayFriend(row, friend, playerRuleset)
                         offset = offset + 73
                     end
                 end
@@ -386,7 +491,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     local groups
     local function Refresh()
         local query = search:GetText():lower():match("^%s*(.-)%s*$")
-        groups = CollectFriends(tabs[activeTab], query)
+        groups = CollectFriends(tabs[activeTab], query, filters)
         Render(groups)
     end
 
@@ -422,32 +527,31 @@ local function CreateFriendsView(socialFrame, nativeView)
         end)
     end
 
-    local blizzardTab = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-    blizzardTab:SetSize(94, 24)
-    blizzardTab:SetPoint("LEFT", buttons[#buttons], "RIGHT", 5, 0)
-    blizzardTab:SetText("Blizzard")
-    blizzardTab:SetScript("OnClick", function()
-        showingBlizzard = true
-        UpdateVisibility()
-    end)
-
-    local function ShowBetterFriends()
-        showingBlizzard = false
+    local function ShowBlizzard(show)
+        showingBlizzard = show
         UpdateVisibility()
     end
-    launcher:SetScript("OnClick", ShowBetterFriends)
 
-    search:SetScript("OnTextChanged", function(self)
-        placeholder:SetShown(self:GetText() == "")
-        scroll.ScrollBar:SetValue(0)
-        Refresh()
+    launcher:SetScript("OnClick", function()
+        ShowBlizzard(false)
     end)
+    local function RefreshFromTop()
+        if window:IsVisible() then
+            scroll.ScrollBar:SetValue(0)
+            Refresh()
+        end
+    end
+    search.OnSearchTextChanged = RefreshFromTop
+    SetupFilterMenu(filter, filters, RefreshFromTop)
     window:SetScript("OnShow", Refresh)
     window:SetScript("OnHide", function()
         search:ClearFocus()
     end)
-    window:SetScript("OnEvent", function(self)
-        if self:IsVisible() then
+    window:SetScript("OnEvent", function(self, event)
+        if event == "BATTLE_NET_FRIEND_TAG_ENABLED_STATUS_UPDATED" and not C_BattleNet.AreFriendTagsEnabled() then
+            wipe(filters.tags)
+        end
+        if self:IsVisible() and (event ~= "SOCIAL_QUEUE_UPDATE" or filters.status.queued or filters.status.joinable) then
             Refresh()
         end
     end)
@@ -455,17 +559,19 @@ local function CreateFriendsView(socialFrame, nativeView)
     window:RegisterEvent("BN_FRIEND_INFO_CHANGED")
     window:RegisterEvent("BN_CONNECTED")
     window:RegisterEvent("BN_DISCONNECTED")
+    window:RegisterEvent("BATTLE_NET_FRIEND_TAG_ENABLED_STATUS_UPDATED")
+    window:RegisterEvent("SOCIAL_QUEUE_UPDATE")
     -- Observe Blizzard's view changes without modifying its frames or refresh path.
     hooksecurefunc(socialFrame, "SetActiveContentFrame", UpdateVisibility)
     UpdateVisibility()
-    return ShowBetterFriends
+    return ShowBlizzard
 end
 
-local showBetterFriends
+local showBlizzard
 local function TryInstall()
     local socialFrame = SocialUIFrame
     if socialFrame and socialFrame.FriendsList and socialFrame.SetActiveContentFrame then
-        showBetterFriends = CreateFriendsView(socialFrame, socialFrame.FriendsList)
+        showBlizzard = CreateFriendsView(socialFrame, socialFrame.FriendsList)
         return true
     end
 end
@@ -483,9 +589,9 @@ end
 
 SLASH_BETTERFRIENDSLIST1 = "/bfl"
 SLASH_BETTERFRIENDSLIST2 = "/betterfriendslist"
-SlashCmdList.BETTERFRIENDSLIST = function()
-    if showBetterFriends and SocialUIFrame.FriendsList:IsVisible() then
-        showBetterFriends()
+SlashCmdList.BETTERFRIENDSLIST = function(message)
+    if showBlizzard and SocialUIFrame.FriendsList:IsVisible() then
+        showBlizzard(ReadText(message):lower():match("^%s*blizzard%s*$") ~= nil)
     else
         print("Better Friends List: open the Friends tab in the Social window.")
     end
