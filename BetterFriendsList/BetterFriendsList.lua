@@ -98,163 +98,229 @@ local function GetRowDetails(game)
     return (factionText or "Faction unknown") .. "  ·  " .. rulesetText
 end
 
-local function UpdateFriendRow(row)
-    local data = row.elementData
-    local account = data and data.accountInfo
-    if not IsReadableTable(account) or not row.Location then
-        return
+local function GetAccountName(account, game)
+    local name = ReadText(account.accountName)
+    if name == "" then
+        name = ReadText(account.battleTag)
+    end
+    if name == "" then
+        name = ReadText(game.characterName)
+    end
+    return name ~= "" and name or (UNKNOWN or "Unknown")
+end
+
+local function CollectFriends(tab, search)
+    local rows = {}
+    local total = BNGetNumFriends()
+    if not IsReadable(total) or type(total) ~= "number" then
+        return rows
     end
 
-    local game = account.gameAccountInfo
-    local details = GetRowDetails(game)
-    if details then
-        local location = ReadText(row.Location:GetText())
-        row.Location:SetText(location == "" and details or details .. "  ·  " .. location)
-    end
-
-    local holder = row.GameIconHolder
-    local atlas
-    if details and holder and holder:IsShown() and IsReadable(game.wowProjectID)
-        and game.wowProjectID == FOREVER_PROJECT then
-        atlas = factionAtlases[ReadText(game.factionName)]
-    end
-
-    local crest = row.BetterFriendsListFactionCrest
-    if not atlas then
-        if crest then
-            crest:Hide()
+    for index = 1, total do
+        local account = C_BattleNet.GetFriendAccountInfo(index)
+        if IsReadableTable(account) then
+            local level = account.friendLevel
+            if not tab.levels or (IsReadable(level) and tab.levels[level]) then
+                local game = account.gameAccountInfo
+                game = IsReadableTable(game) and game or {}
+                local name = GetAccountName(account, game)
+                local character = ReadText(game.characterName)
+                local battleTag = ReadText(account.battleTag)
+                if search == "" or name:lower():find(search, 1, true)
+                    or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true) then
+                    rows[#rows + 1] = {
+                        name = name,
+                        character = character,
+                        game = game,
+                        online = IsReadable(game.isOnline) and game.isOnline == true,
+                    }
+                end
+            end
         end
-        return
     end
 
-    if not crest then
-        crest = holder:CreateTexture(nil, "ARTWORK")
-        crest:SetPoint("RIGHT", holder, "LEFT", -3, 0)
-        row.BetterFriendsListFactionCrest = crest
+    table.sort(rows, function(a, b)
+        if a.online ~= b.online then
+            return a.online
+        end
+        return a.name:lower() < b.name:lower()
+    end)
+    return rows
+end
+
+local function CreateRow(parent, index)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetPoint("TOPLEFT", 0, -(index - 1) * 45)
+    row:SetPoint("TOPRIGHT", 0, -(index - 1) * 45)
+    row:SetHeight(42)
+
+    local background = row:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.06, 0.11, 0.17, 0.9)
+
+    row.gameIcon = row:CreateTexture(nil, "ARTWORK")
+    row.gameIcon:SetSize(22, 22)
+    row.gameIcon:SetPoint("RIGHT", -9, 0)
+    row.crest = row:CreateTexture(nil, "ARTWORK")
+    row.crest:SetSize(19, 19)
+    row.crest:SetPoint("RIGHT", row.gameIcon, "LEFT", -5, 0)
+
+    row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.name:SetPoint("TOPLEFT", 9, -6)
+    row.name:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
+    row.name:SetJustifyH("LEFT")
+    row.name:SetWordWrap(false)
+
+    row.details = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    row.details:SetPoint("TOPLEFT", row.name, "BOTTOMLEFT", 0, -4)
+    row.details:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
+    row.details:SetJustifyH("LEFT")
+    row.details:SetWordWrap(false)
+    return row
+end
+
+local function DisplayFriend(row, friend)
+    local game = friend.game
+    local name = friend.name
+    if friend.online and friend.character ~= "" and friend.character ~= name then
+        name = name .. "  ·  " .. friend.character
     end
-    local size = holder:GetHeight()
-    crest:SetAtlas(atlas, false)
-    crest:SetSize(size, size)
-    crest:Show()
+    row.name:SetText(name)
+    row.name:SetAlpha(friend.online and 1 or 0.55)
 
-    -- Reserve space for the crest and let Blizzard recalculate text truncation.
-    local rightOffset = row.textHolderRightXOffset
-    row.textHolderRightXOffset = rightOffset - size - 3
-    row:LayoutScaledContent()
-    row.textHolderRightXOffset = rightOffset
+    local details = GetRowDetails(game)
+    local location = ReadText(game.areaName)
+    if location == "" and not details then
+        location = ReadText(game.richPresence)
+    end
+    if details and location ~= "" then
+        details = details .. "  ·  " .. location
+    end
+    row.details:SetText(friend.online and (details or location) or (FRIENDS_LIST_OFFLINE or "Offline"))
+
+    local client = ReadText(game.clientProgram)
+    local showIcon = friend.online and client ~= ""
+    if showIcon then
+        local subIcon = ReadText(game.subIcon)
+        C_Texture.SetTitleIconTexture(row.gameIcon, client, Enum.TitleIconVersion.Small, subIcon ~= "" and subIcon or nil)
+    end
+    row.gameIcon:SetShown(showIcon)
+
+    local isForever = IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
+    local crest = showIcon and client == BNET_CLIENT_WOW and isForever
+        and factionAtlases[ReadText(game.factionName)]
+    if crest then
+        row.crest:SetAtlas(crest, false)
+    end
+    row.crest:SetShown(not not crest)
+    row:Show()
 end
 
-local function MatchesTab(levels, account)
-    return IsReadableTable(account) and IsReadable(account.friendLevel)
-        and levels[account.friendLevel]
-end
+local function CreateFriendsWindow()
+    local window = CreateFrame("Frame", "BetterFriendsListWindow", UIParent, "BackdropTemplate")
+    window:SetSize(410, 560)
+    window:SetPoint("CENTER")
+    window:SetFrameStrata("DIALOG")
+    window:SetClampedToScreen(true)
+    window:SetMovable(true)
+    window:EnableMouse(true)
+    window:RegisterForDrag("LeftButton")
+    window:SetScript("OnDragStart", window.StartMoving)
+    window:SetScript("OnDragStop", window.StopMovingOrSizing)
+    window:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
+        edgeSize = 24,
+        insets = { left = 5, right = 5, top = 5, bottom = 5 },
+    })
+    window:SetBackdropColor(0.025, 0.025, 0.035, 1)
+    window:Hide()
+    table.insert(UISpecialFrames, window:GetName())
 
-local function AddFriendTabs(view)
-    local scrollBox = view.ScrollBox
-    local tabBar = CreateFrame("Frame", nil, view)
-    tabBar:SetPoint("TOPLEFT", 10, -8)
-    tabBar:SetPoint("TOPRIGHT", -10, -8)
-    tabBar:SetHeight(26)
+    local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+    close:SetScript("OnClick", function()
+        window:Hide()
+    end)
+    local title = window:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Better Friends List")
 
-    view.FilterBar:ClearAllPoints()
-    view.FilterBar:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", -10, 0)
-    view.FilterBar:SetPoint("TOPRIGHT", tabBar, "BOTTOMRIGHT", 10, 0)
+    local search = CreateFrame("EditBox", nil, window, "InputBoxTemplate")
+    search:SetPoint("TOPLEFT", 20, -80)
+    search:SetPoint("TOPRIGHT", -16, -80)
+    search:SetHeight(22)
+    search:SetAutoFocus(false)
+    search:SetScript("OnEscapePressed", search.ClearFocus)
+    local placeholder = search:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+    placeholder:SetPoint("LEFT", 2, 0)
+    placeholder:SetText(SEARCH or "Search")
+
+    local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 14, -112)
+    scroll:SetPoint("BOTTOMRIGHT", -31, 15)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(365, 1)
+    scroll:SetScrollChild(content)
+
+    local empty = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    empty:SetPoint("TOP", 0, -25)
+    empty:SetText("No friends to display.")
 
     local activeTab = 1
-    local buttons = {}
-    local empty = scrollBox:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    empty:SetPoint("TOPLEFT", 12, -28)
-    empty:SetPoint("TOPRIGHT", -12, -28)
-    empty:Hide()
-
-    local function UpdateTabs()
-        for index, button in ipairs(buttons) do
-            local selected = index == activeTab
-            button.Selected:SetShown(selected)
-            button.Label:SetTextColor(1, selected and 0.87 or 0.79, selected and 0.49 or 0.28)
+    local rows, buttons = {}, {}
+    local function Refresh()
+        local query = search:GetText():lower():match("^%s*(.-)%s*$")
+        local friends = CollectFriends(tabs[activeTab], query)
+        for index, friend in ipairs(friends) do
+            rows[index] = rows[index] or CreateRow(content, index)
+            DisplayFriend(rows[index], friend)
         end
+        for index = #friends + 1, #rows do
+            rows[index]:Hide()
+        end
+        content:SetHeight(math.max(#friends * 45, 1))
+        empty:SetShown(#friends == 0)
     end
 
     for index, tab in ipairs(tabs) do
-        local button = CreateFrame("Button", nil, tabBar)
-        button:SetSize(index == 1 and 111 or 80, 26)
-        button:SetNormalTexture("Interface\\Buttons\\WHITE8x8")
-        button:GetNormalTexture():SetVertexColor(0.12, 0.10, 0.08, 0.9)
-        button:SetHighlightTexture("Interface\\Buttons\\WHITE8x8")
-        button:GetHighlightTexture():SetVertexColor(0.88, 0.64, 0.27, 0.17)
-        button.Selected = button:CreateTexture(nil, "ARTWORK")
-        button.Selected:SetColorTexture(1, 0.7, 0.27)
-        button.Selected:SetPoint("BOTTOMLEFT", 4, 0)
-        button.Selected:SetPoint("BOTTOMRIGHT", -4, 0)
-        button.Selected:SetHeight(2)
-        button.Label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        button.Label:SetPoint("CENTER", 0, 1)
-        button.Label:SetText(tab.label)
-        if index == 1 then
-            button:SetPoint("TOPLEFT", tabBar)
-        else
-            button:SetPoint("LEFT", buttons[index - 1], "RIGHT", 3, 0)
-        end
+        local button = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
+        button:SetSize(116, 24)
+        button:SetPoint("TOPLEFT", 14 + (index - 1) * 121, -45)
+        button:SetText(tab.label)
         buttons[index] = button
-
+        button:SetEnabled(index ~= activeTab)
         button:SetScript("OnClick", function()
-            if activeTab ~= index then
-                activeTab = index
-                UpdateTabs()
-                view:Refresh(ScrollBoxConstants.DiscardScrollPosition)
-            end
+            buttons[activeTab]:Enable()
+            activeTab = index
+            button:Disable()
+            scroll.ScrollBar:SetValue(0)
+            Refresh()
         end)
     end
 
-    -- Filter search results before Blizzard creates headers and counts favorites.
-    local insertFriends = view.InsertFriendsIntoDataProvider
-    function view:InsertFriendsIntoDataProvider(provider, friends)
-        local levels = tabs[activeTab].levels
-        if not levels then
-            return insertFriends(self, provider, friends)
-        end
-
-        local matchingFriends = {}
-        for _, friendIndex in ipairs(friends) do
-            if MatchesTab(levels, C_BattleNet.GetFriendAccountInfo(friendIndex)) then
-                matchingFriends[#matchingFriends + 1] = friendIndex
-            end
-        end
-        return insertFriends(self, provider, matchingFriends)
-    end
-
-    ScrollUtil.AddInitializedFrameCallback(scrollBox, function(_, row)
-        UpdateFriendRow(row)
-    end, tabBar)
-
-    hooksecurefunc(scrollBox, "SetDataProvider", function(self)
-        empty:SetText("No friends to display in " .. tabs[activeTab].label .. ".")
-        empty:SetShown(self:GetDataProviderSize() == 0)
+    search:SetScript("OnTextChanged", function(self)
+        placeholder:SetShown(self:GetText() == "")
+        scroll.ScrollBar:SetValue(0)
+        Refresh()
     end)
-
-    UpdateTabs()
-    if view:IsVisible() then
-        view:Refresh(ScrollBoxConstants.DiscardScrollPosition)
-    end
-end
-
-local function TryInstall()
-    local view = SocialUIFrame and SocialUIFrame.FriendsList
-    if not view or not view.InsertFriendsIntoDataProvider or not view.FilterBar then
-        return false
-    end
-
-    AddFriendTabs(view)
-    return true
-end
-
-if not TryInstall() then
-    local loader = CreateFrame("Frame")
-    loader:RegisterEvent("ADDON_LOADED")
-    loader:RegisterEvent("PLAYER_LOGIN")
-    loader:SetScript("OnEvent", function(self)
-        if TryInstall() then
-            self:UnregisterAllEvents()
+    window:SetScript("OnShow", Refresh)
+    window:SetScript("OnEvent", function(self)
+        if self:IsShown() then
+            Refresh()
         end
     end)
+    window:RegisterEvent("BN_FRIEND_LIST_SIZE_CHANGED")
+    window:RegisterEvent("BN_FRIEND_INFO_CHANGED")
+    window:RegisterEvent("BN_CONNECTED")
+    window:RegisterEvent("BN_DISCONNECTED")
+    return window
+end
+
+local window
+SLASH_BETTERFRIENDSLIST1 = "/bfl"
+SLASH_BETTERFRIENDSLIST2 = "/betterfriendslist"
+SlashCmdList.BETTERFRIENDSLIST = function()
+    window = window or CreateFriendsWindow()
+    window:SetShown(not window:IsShown())
 end
