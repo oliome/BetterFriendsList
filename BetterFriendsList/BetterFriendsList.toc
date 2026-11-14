@@ -1,0 +1,7 @@
+## Interface: 16001
+## Title: Better Friends List
+## Notes: Friend tabs, faction labels, and ruleset comparisons for WoW: Forever.
+## Version: 0.1.1
+## OptionalDeps: Blizzard_SocialUI
+
+BetterFriendsList.lua
