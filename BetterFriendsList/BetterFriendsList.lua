@@ -10,15 +10,33 @@ local tabs = {
     { label = "Battle.net", levels = { [friendLevel.RealID] = true, [friendLevel.BattleTag] = true } },
 }
 
+local wowSection = { key = "wow", label = "In-Game WoW Friends" }
 local sections = {
     { key = "Normal", label = "WoW: Forever — Normal" },
     { key = "PvP", label = "WoW: Forever — PvP" },
     { key = "RP", label = "WoW: Forever — RP" },
     { key = "RP-PvP", label = "WoW: Forever — RP-PvP" },
     { key = "unknown", label = "WoW: Forever — Unknown Ruleset" },
-    { key = "wow", label = "In-Game WoW Friends" },
+    wowSection,
     { key = "other", label = "Other" },
 }
+
+local function GetSectionOrder(playerRuleset)
+    local ordered = {}
+    for _, section in ipairs(sections) do
+        if section.key == playerRuleset then
+            ordered[1] = section
+            break
+        end
+    end
+    ordered[#ordered + 1] = wowSection
+    for _, section in ipairs(sections) do
+        if section ~= wowSection and section.key ~= playerRuleset then
+            ordered[#ordered + 1] = section
+        end
+    end
+    return ordered
+end
 
 local statusFilters = {
     { key = "online", label = SOCIAL_UI_PRESENCE_TYPE_LABEL_ONLINE or "Online" },
@@ -231,9 +249,12 @@ local function CreateSectionHeader(parent)
     header:SetNormalAtlas("common-button-list-collapseExpand")
     header:SetHighlightAtlas("common-button-list-collapseExpand")
     header.label = header:CreateFontString(nil, "OVERLAY", "Game15Font_Shadow")
-    header.label:SetPoint("LEFT", 8, 0)
     header.icon = header:CreateTexture(nil, "ARTWORK")
     header.icon:SetPoint("RIGHT", -7, 0)
+    header.label:SetPoint("LEFT", 8, 0)
+    header.label:SetPoint("RIGHT", header.icon, "LEFT", -6, 0)
+    header.label:SetJustifyH("LEFT")
+    header.label:SetWordWrap(false)
     return header
 end
 
@@ -243,6 +264,11 @@ local function CreateRow(parent)
 
     row.background = row:CreateTexture(nil, "BACKGROUND")
     row.background:SetAllPoints()
+    row.hordeBackground = row:CreateTexture(nil, "BACKGROUND", nil, 1)
+    row.hordeBackground:SetPoint("TOPLEFT", 1, -1)
+    row.hordeBackground:SetPoint("BOTTOMRIGHT", -1, 1)
+    row.hordeBackground:SetColorTexture(1, 1, 1)
+    row.hordeBackground:SetGradient("HORIZONTAL", CreateColor(0.23, 0.055, 0.06), CreateColor(0.105, 0.022, 0.028))
     row.presence = row:CreateTexture(nil, "ARTWORK")
     row.presence:SetSize(14, 14)
     row.presence:SetPoint("CENTER", row, "TOPLEFT", 4, -4)
@@ -276,8 +302,11 @@ end
 
 local function DisplayFriend(row, friend, playerRuleset)
     local game = friend.game
-    local background = friend.isWoWFriend and "friends-card-default" or "friends-card-battleNet"
+    local client = ReadText(game.clientProgram)
+    local faction = client == BNET_CLIENT_WOW and ReadText(game.factionName)
+    local background = friend.isWoWFriend and faction ~= "Alliance" and "friends-card-default" or "friends-card-battleNet"
     row.background:SetAtlas(friend.online and background or "friends-card-disabled")
+    row.hordeBackground:SetShown(friend.online and faction == "Horde")
     local presence = friend.away and "away" or (friend.busy and "busy" or "online")
     row.presence:SetAtlas("friends-status-" .. (friend.online and presence or "offline"))
     row.name:SetText(friend.name)
@@ -323,7 +352,6 @@ local function DisplayFriend(row, friend, playerRuleset)
     end
     row.details:SetTextColor(0.63, 0.65, 0.67)
 
-    local client = ReadText(game.clientProgram)
     local showIcon = friend.online and client ~= ""
     if showIcon then
         local subIcon = ReadText(game.subIcon)
@@ -333,7 +361,7 @@ local function DisplayFriend(row, friend, playerRuleset)
 
     local isForever = IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
     local crest = showIcon and client == BNET_CLIENT_WOW and isForever
-        and factionAtlases[ReadText(game.factionName)]
+        and factionAtlases[faction]
     if crest then
         row.crest:SetAtlas(crest, false)
     end
@@ -397,24 +425,25 @@ local function CreateFriendsView(socialFrame, nativeView)
     launcher:Hide()
 
     local filter = CreateFrame("DropdownButton", nil, window, "SocialUISearchFilterDropdownTemplate")
-    filter:SetPoint("TOPRIGHT", -13, -41)
+    filter:SetPoint("TOPRIGHT", -15, -45)
     filter:SetSize(126, 30)
     local search = CreateFrame("EditBox", nil, window, "SocialUISearchBoxTemplate")
-    search:SetPoint("TOPLEFT", 15, -46)
-    search:SetPoint("RIGHT", filter, "LEFT", -16, 0)
+    search:SetPoint("LEFT", window, "TOPLEFT", 15, -60)
+    search:SetPoint("RIGHT", filter, "LEFT", -10, 0)
     search:SetHeight(20)
     search:SetAutoFocus(false)
 
     local divider = window:CreateTexture(nil, "BORDER")
     divider:SetAtlas("perks-divider-short")
-    divider:SetPoint("TOPLEFT", 5, -75)
-    divider:SetPoint("TOPRIGHT", -5, -75)
+    divider:SetPoint("TOPLEFT", 8, -82)
+    divider:SetPoint("TOPRIGHT", -8, -82)
     divider:SetHeight(3)
 
     local addFriend = CreateFrame("Button", nil, window, "SocialUIActionButtonTemplate")
     Mixin(addFriend, SocialUIAddFriendButtonMixin)
     addFriend:SetPoint("BOTTOM", 0, 12)
-    addFriend:SetSize(160, 30)
+    addFriend.baseWidth = 206
+    addFriend.maxWidth = 370
     addFriend:SetText(SOCIAL_UI_FRIENDS_LIST_ADD_FRIEND_BUTTON_LABEL or "Add New Friend")
     local footer = window:CreateTexture(nil, "BORDER")
     footer:SetAtlas("perks-divider-short")
@@ -423,7 +452,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     footer:SetHeight(3)
 
     local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -79)
+    scroll:SetPoint("TOPLEFT", 14, -89)
     scroll:SetPoint("BOTTOMRIGHT", -31, 56)
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(1, 1)
@@ -449,10 +478,10 @@ local function CreateFriendsView(socialFrame, nativeView)
     end
 
     local function Render(groups)
-        local rowIndex, offset = 0, 7
+        local rowIndex, offset = 0, 3
         local hasFriends = false
         local playerRuleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
-        for _, section in ipairs(sections) do
+        for _, section in ipairs(GetSectionOrder(playerRuleset)) do
             local friends = groups[section.key]
             local header = headers[section.key]
             header:SetShown(#friends > 0)
@@ -509,11 +538,11 @@ local function CreateFriendsView(socialFrame, nativeView)
 
     for index, tab in ipairs(tabs) do
         local button = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        button:SetSize(index == 1 and 56 or 101, 24)
+        button:SetSize(119, 24)
         if index == 1 then
-            button:SetPoint("TOPLEFT", 13, -11)
+            button:SetPoint("TOPLEFT", 15, -12)
         else
-            button:SetPoint("LEFT", buttons[index - 1], "RIGHT", 5, 0)
+            button:SetPoint("LEFT", buttons[index - 1], "RIGHT", 7, 0)
         end
         button:SetText(tab.label)
         buttons[index] = button
