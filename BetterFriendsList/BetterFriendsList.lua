@@ -216,39 +216,26 @@ local function DisplayFriend(row, friend)
     row:Show()
 end
 
-local function CreateFriendsWindow()
-    local window = CreateFrame("Frame", "BetterFriendsListWindow", UIParent, "BackdropTemplate")
-    window:SetSize(410, 560)
-    window:SetPoint("CENTER")
-    window:SetFrameStrata("DIALOG")
-    window:SetClampedToScreen(true)
-    window:SetMovable(true)
+local function CreateFriendsView(socialFrame, nativeView)
+    local window = CreateFrame("Frame", nil, socialFrame, "BackdropTemplate")
+    window:SetAllPoints(nativeView)
+    window:SetFrameLevel(nativeView:GetFrameLevel() + 20)
     window:EnableMouse(true)
-    window:RegisterForDrag("LeftButton")
-    window:SetScript("OnDragStart", window.StartMoving)
-    window:SetScript("OnDragStop", window.StopMovingOrSizing)
-    window:SetBackdrop({
-        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        edgeSize = 24,
-        insets = { left = 5, right = 5, top = 5, bottom = 5 },
-    })
+    window:EnableMouseWheel(true)
+    window:SetBackdrop({ bgFile = "Interface/Buttons/WHITE8x8" })
     window:SetBackdropColor(0.025, 0.025, 0.035, 1)
     window:Hide()
-    table.insert(UISpecialFrames, window:GetName())
 
-    local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", -4, -4)
-    close:SetScript("OnClick", function()
-        window:Hide()
-    end)
-    local title = window:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Better Friends List")
+    local launcher = CreateFrame("Button", nil, socialFrame, "UIPanelButtonTemplate")
+    launcher:SetFrameLevel(window:GetFrameLevel())
+    launcher:SetSize(101, 24)
+    launcher:SetPoint("BOTTOMRIGHT", nativeView, "BOTTOMRIGHT", -8, 14)
+    launcher:SetText("Better Friends")
+    launcher:Hide()
 
     local search = CreateFrame("EditBox", nil, window, "InputBoxTemplate")
-    search:SetPoint("TOPLEFT", 20, -80)
-    search:SetPoint("TOPRIGHT", -16, -80)
+    search:SetPoint("TOPLEFT", 20, -47)
+    search:SetPoint("TOPRIGHT", -16, -47)
     search:SetHeight(22)
     search:SetAutoFocus(false)
     search:SetScript("OnEscapePressed", search.ClearFocus)
@@ -257,10 +244,14 @@ local function CreateFriendsWindow()
     placeholder:SetText(SEARCH or "Search")
 
     local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -112)
+    scroll:SetPoint("TOPLEFT", 14, -79)
     scroll:SetPoint("BOTTOMRIGHT", -31, 15)
     local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(365, 1)
+    content:SetSize(1, 1)
+    scroll:SetScript("OnSizeChanged", function(_, width)
+        content:SetWidth(math.max(1, width))
+    end)
+    content:SetWidth(math.max(1, scroll:GetWidth()))
     scroll:SetScrollChild(content)
 
     local empty = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -269,6 +260,13 @@ local function CreateFriendsWindow()
 
     local activeTab = 1
     local rows, buttons = {}, {}
+    local showingBlizzard = false
+    local function UpdateVisibility()
+        local friendsVisible = nativeView:IsVisible() and not C_SocialRestrictions.IsFriendsDisabled()
+        window:SetShown(friendsVisible and not showingBlizzard)
+        launcher:SetShown(friendsVisible and showingBlizzard)
+    end
+
     local function Refresh()
         local query = search:GetText():lower():match("^%s*(.-)%s*$")
         local friends = CollectFriends(tabs[activeTab], query)
@@ -285,8 +283,12 @@ local function CreateFriendsWindow()
 
     for index, tab in ipairs(tabs) do
         local button = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        button:SetSize(116, 24)
-        button:SetPoint("TOPLEFT", 14 + (index - 1) * 121, -45)
+        button:SetSize(index == 3 and 56 or 101, 24)
+        if index == 1 then
+            button:SetPoint("TOPLEFT", 13, -11)
+        else
+            button:SetPoint("LEFT", buttons[index - 1], "RIGHT", 5, 0)
+        end
         button:SetText(tab.label)
         buttons[index] = button
         button:SetEnabled(index ~= activeTab)
@@ -299,14 +301,32 @@ local function CreateFriendsWindow()
         end)
     end
 
+    local blizzardTab = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
+    blizzardTab:SetSize(94, 24)
+    blizzardTab:SetPoint("LEFT", buttons[#buttons], "RIGHT", 5, 0)
+    blizzardTab:SetText("Blizzard")
+    blizzardTab:SetScript("OnClick", function()
+        showingBlizzard = true
+        UpdateVisibility()
+    end)
+
+    local function ShowBetterFriends()
+        showingBlizzard = false
+        UpdateVisibility()
+    end
+    launcher:SetScript("OnClick", ShowBetterFriends)
+
     search:SetScript("OnTextChanged", function(self)
         placeholder:SetShown(self:GetText() == "")
         scroll.ScrollBar:SetValue(0)
         Refresh()
     end)
     window:SetScript("OnShow", Refresh)
+    window:SetScript("OnHide", function()
+        search:ClearFocus()
+    end)
     window:SetScript("OnEvent", function(self)
-        if self:IsShown() then
+        if self:IsVisible() then
             Refresh()
         end
     end)
@@ -314,13 +334,38 @@ local function CreateFriendsWindow()
     window:RegisterEvent("BN_FRIEND_INFO_CHANGED")
     window:RegisterEvent("BN_CONNECTED")
     window:RegisterEvent("BN_DISCONNECTED")
-    return window
+    -- Observe Blizzard's view changes without modifying its frames or refresh path.
+    hooksecurefunc(socialFrame, "SetActiveContentFrame", UpdateVisibility)
+    UpdateVisibility()
+    return ShowBetterFriends
 end
 
-local window
+local showBetterFriends
+local function TryInstall()
+    local socialFrame = SocialUIFrame
+    if socialFrame and socialFrame.FriendsList and socialFrame.SetActiveContentFrame then
+        showBetterFriends = CreateFriendsView(socialFrame, socialFrame.FriendsList)
+        return true
+    end
+end
+
+if not TryInstall() then
+    local loader = CreateFrame("Frame")
+    loader:RegisterEvent("ADDON_LOADED")
+    loader:RegisterEvent("PLAYER_LOGIN")
+    loader:SetScript("OnEvent", function(self)
+        if TryInstall() then
+            self:UnregisterAllEvents()
+        end
+    end)
+end
+
 SLASH_BETTERFRIENDSLIST1 = "/bfl"
 SLASH_BETTERFRIENDSLIST2 = "/betterfriendslist"
 SlashCmdList.BETTERFRIENDSLIST = function()
-    window = window or CreateFriendsWindow()
-    window:SetShown(not window:IsShown())
+    if showBetterFriends and SocialUIFrame.FriendsList:IsVisible() then
+        showBetterFriends()
+    else
+        print("Better Friends List: open the Friends tab in the Social window.")
+    end
 end
