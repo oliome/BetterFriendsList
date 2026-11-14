@@ -122,7 +122,7 @@ local function GetRowDetails(game, friendRuleset, playerRuleset)
 
     local rulesetText = friendRuleset or "Ruleset unknown"
     if friendRuleset and friendRuleset == playerRuleset then
-        rulesetText = ColorText("91e3ad", friendRuleset .. " (same)")
+        rulesetText = ColorText("91e3ad", friendRuleset)
     end
 
     return (factionText or "Faction unknown") .. "  ·  " .. rulesetText
