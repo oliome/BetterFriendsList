@@ -4,11 +4,6 @@ if WOW_PROJECT_ID ~= FOREVER_PROJECT then
 end
 
 local friendLevel = Enum.BattleNetFriendLevel
-local tabs = {
-    { label = "All" },
-    { label = "WoW Friends", levels = { [friendLevel.Title] = true } },
-    { label = "Battle.net", levels = { [friendLevel.RealID] = true, [friendLevel.BattleTag] = true } },
-}
 
 local wowSection = { key = "wow", label = "In-Game WoW Friends" }
 local sections = {
@@ -175,7 +170,7 @@ local function MatchesTags(filters, tags)
     return false
 end
 
-local function CollectFriends(tab, search, filters)
+local function CollectFriends(search, filters)
     local groups = {}
     for _, section in ipairs(sections) do
         groups[section.key] = {}
@@ -189,38 +184,37 @@ local function CollectFriends(tab, search, filters)
         local account = C_BattleNet.GetFriendAccountInfo(index)
         if IsReadableTable(account) then
             local level = account.friendLevel
-            if not tab.levels or (IsReadable(level) and tab.levels[level]) then
-                local game = account.gameAccountInfo
-                game = IsReadableTable(game) and game or {}
-                local name = GetAccountName(account, game)
-                local character = ReadText(game.characterName)
-                local battleTag = ReadText(account.battleTag)
-                if (search == "" or name:lower():find(search, 1, true)
-                    or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true))
-                    and MatchesTags(filters.tags, account.friendTags) then
-                    local online = IsReadable(game.isOnline) and game.isOnline == true
-                    local isWoWFriend = IsReadable(level) and level == friendLevel.Title
-                    local isForever = online and ReadText(game.clientProgram) == BNET_CLIENT_WOW
-                        and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
-                    local ruleset = isForever and GetFriendRuleset(game) or nil
-                    local friend = {
-                        name = name,
-                        sortName = name:lower(),
-                        character = character,
-                        game = game,
-                        online = online,
-                        isWoWFriend = isWoWFriend,
-                        ruleset = ruleset,
-                        away = (IsReadable(account.isAFK) and account.isAFK == true)
-                            or (IsReadable(game.isGameAFK) and game.isGameAFK == true),
-                        busy = (IsReadable(account.isDND) and account.isDND == true)
-                            or (IsReadable(game.isGameBusy) and game.isGameBusy == true),
-                    }
-                    if MatchesStatus(filters.status, friend) then
-                        local key = isWoWFriend and "wow" or (isForever and (ruleset or "unknown") or "other")
-                        local rows = groups[key]
-                        rows[#rows + 1] = friend
-                    end
+            local game = account.gameAccountInfo
+            game = IsReadableTable(game) and game or {}
+            local name = GetAccountName(account, game)
+            local sortName = name:lower()
+            local character = ReadText(game.characterName)
+            local battleTag = ReadText(account.battleTag)
+            if (search == "" or sortName:find(search, 1, true)
+                or character:lower():find(search, 1, true) or battleTag:lower():find(search, 1, true))
+                and MatchesTags(filters.tags, account.friendTags) then
+                local online = IsReadable(game.isOnline) and game.isOnline == true
+                local isWoWFriend = IsReadable(level) and level == friendLevel.Title
+                local isForever = online and ReadText(game.clientProgram) == BNET_CLIENT_WOW
+                    and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
+                local ruleset = isForever and GetFriendRuleset(game) or nil
+                local friend = {
+                    name = name,
+                    sortName = sortName,
+                    character = character,
+                    game = game,
+                    online = online,
+                    isWoWFriend = isWoWFriend,
+                    ruleset = ruleset,
+                    away = (IsReadable(account.isAFK) and account.isAFK == true)
+                        or (IsReadable(game.isGameAFK) and game.isGameAFK == true),
+                    busy = (IsReadable(account.isDND) and account.isDND == true)
+                        or (IsReadable(game.isGameBusy) and game.isGameBusy == true),
+                }
+                if MatchesStatus(filters.status, friend) then
+                    local key = isWoWFriend and "wow" or (isForever and (ruleset or "unknown") or "other")
+                    local rows = groups[key]
+                    rows[#rows + 1] = friend
                 end
             end
         end
@@ -425,18 +419,18 @@ local function CreateFriendsView(socialFrame, nativeView)
     launcher:Hide()
 
     local filter = CreateFrame("DropdownButton", nil, window, "SocialUISearchFilterDropdownTemplate")
-    filter:SetPoint("TOPRIGHT", -15, -45)
+    filter:SetPoint("TOPRIGHT", -15, -10)
     filter:SetSize(126, 30)
     local search = CreateFrame("EditBox", nil, window, "SocialUISearchBoxTemplate")
-    search:SetPoint("LEFT", window, "TOPLEFT", 15, -60)
+    search:SetPoint("LEFT", window, "TOPLEFT", 15, -25)
     search:SetPoint("RIGHT", filter, "LEFT", -10, 0)
     search:SetHeight(20)
     search:SetAutoFocus(false)
 
     local divider = window:CreateTexture(nil, "BORDER")
     divider:SetAtlas("perks-divider-short")
-    divider:SetPoint("TOPLEFT", 8, -82)
-    divider:SetPoint("TOPRIGHT", -8, -82)
+    divider:SetPoint("TOPLEFT", 8, -47)
+    divider:SetPoint("TOPRIGHT", -8, -47)
     divider:SetHeight(3)
 
     local addFriend = CreateFrame("Button", nil, window, "SocialUIActionButtonTemplate")
@@ -451,9 +445,21 @@ local function CreateFriendsView(socialFrame, nativeView)
     footer:SetPoint("BOTTOMRIGHT", -5, 52)
     footer:SetHeight(3)
 
-    local scroll = CreateFrame("ScrollFrame", "BetterFriendsListScrollFrame", window, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", 14, -89)
-    scroll:SetPoint("BOTTOMRIGHT", -31, 56)
+    local scroll = CreateFrame("ScrollFrame", nil, window)
+    scroll:SetPoint("TOPLEFT", 14, -54)
+    scroll:SetPoint("BOTTOMRIGHT", -27, 56)
+    scroll:EnableMouseWheel(true)
+    local scrollBar = CreateFrame("EventFrame", nil, window, "MinimalScrollBar")
+    scrollBar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 5, -7)
+    scrollBar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 5, 4)
+    ScrollUtil.InitScrollFrameWithScrollBar(scroll, scrollBar)
+    scroll:HookScript("OnScrollRangeChanged", function(self, _, verticalRange)
+        if self:GetVerticalScroll() > verticalRange then
+            self:SetVerticalScroll(verticalRange)
+        end
+        scrollBar:SetShown(verticalRange > 0)
+    end)
+    scrollBar:Hide()
     local content = CreateFrame("Frame", nil, scroll)
     content:SetSize(1, 1)
     scroll:SetScript("OnSizeChanged", function(_, width)
@@ -466,8 +472,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     empty:SetPoint("TOP", 0, -25)
     empty:SetText("No friends to display.")
 
-    local activeTab = 1
-    local rows, buttons, headers = {}, {}, {}
+    local rows, headers = {}, {}
     local collapsed = {}
     local filters = { status = {}, tags = {} }
     local showingBlizzard = false
@@ -520,7 +525,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     local groups
     local function Refresh()
         local query = search:GetText():lower():match("^%s*(.-)%s*$")
-        groups = CollectFriends(tabs[activeTab], query, filters)
+        groups = CollectFriends(query, filters)
         Render(groups)
     end
 
@@ -531,29 +536,8 @@ local function CreateFriendsView(socialFrame, nativeView)
         header:SetScript("OnClick", function()
             collapsed[key] = not collapsed[key]
             Render(groups)
-            scroll.ScrollBar:SetValue(math.min(scroll.ScrollBar:GetValue(), scroll:GetVerticalScrollRange()))
         end)
         headers[key] = header
-    end
-
-    for index, tab in ipairs(tabs) do
-        local button = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        button:SetSize(119, 24)
-        if index == 1 then
-            button:SetPoint("TOPLEFT", 15, -12)
-        else
-            button:SetPoint("LEFT", buttons[index - 1], "RIGHT", 7, 0)
-        end
-        button:SetText(tab.label)
-        buttons[index] = button
-        button:SetEnabled(index ~= activeTab)
-        button:SetScript("OnClick", function()
-            buttons[activeTab]:Enable()
-            activeTab = index
-            button:Disable()
-            scroll.ScrollBar:SetValue(0)
-            Refresh()
-        end)
     end
 
     local function ShowBlizzard(show)
@@ -566,7 +550,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     end)
     local function RefreshFromTop()
         if window:IsVisible() then
-            scroll.ScrollBar:SetValue(0)
+            scroll:SetVerticalScroll(0)
             Refresh()
         end
     end
