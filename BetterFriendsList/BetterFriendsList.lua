@@ -1,3 +1,4 @@
+local _, Addon = ...
 local FOREVER_PROJECT = WOW_PROJECT_CAMELOT or 18
 if WOW_PROJECT_ID ~= FOREVER_PROJECT then
     return
@@ -5,16 +6,15 @@ end
 
 local friendLevel = Enum.BattleNetFriendLevel
 
-local wowSection = { key = "wow", label = "In-Game WoW Friends" }
 local sections = {
     { key = "Normal", label = "WoW: Forever — Normal" },
     { key = "PvP", label = "WoW: Forever — PvP" },
     { key = "RP", label = "WoW: Forever — RP" },
     { key = "RP-PvP", label = "WoW: Forever — RP-PvP" },
     { key = "unknown", label = "WoW: Forever — Unknown Ruleset" },
-    wowSection,
     { key = "other", label = "Other" },
 }
+Addon.sections = sections
 
 local function GetSectionOrder(playerRuleset)
     local ordered = {}
@@ -24,9 +24,8 @@ local function GetSectionOrder(playerRuleset)
             break
         end
     end
-    ordered[#ordered + 1] = wowSection
     for _, section in ipairs(sections) do
-        if section ~= wowSection and section.key ~= playerRuleset then
+        if section.key ~= playerRuleset then
             ordered[#ordered + 1] = section
         end
     end
@@ -216,7 +215,7 @@ local function CollectFriends(search, filters)
                         or (IsReadable(game.isGameBusy) and game.isGameBusy == true),
                 }
                 if MatchesStatus(filters.status, friend) then
-                    local key = isWoWFriend and "wow" or (isForever and (ruleset or "unknown") or "other")
+                    local key = isForever and (ruleset or "unknown") or "other"
                     local rows = groups[key]
                     rows[#rows + 1] = friend
                 end
@@ -402,6 +401,10 @@ local function SetupFilterMenu(filter, filters, refresh)
             AddTags(tagsMenu, SOCIAL_UI_BATTLE_NET_FRIEND_TAG_ROLES_LABEL or "Roles",
                 SocialUIUtil.GetSupportedBattleNetFriendTagRolesForCurrentGameType())
         end
+        root:CreateDivider()
+        root:CreateButton("Section settings", function()
+            Addon.OpenOptions()
+        end)
     end
 end
 
@@ -482,7 +485,7 @@ local function CreateFriendsView(socialFrame, nativeView)
         if collapsed[key] ~= nil then
             return collapsed[key]
         end
-        return key ~= wowSection.key and key ~= playerRuleset
+        return key ~= playerRuleset
     end
 
     local filters = { status = {}, tags = {} }
@@ -509,7 +512,16 @@ local function CreateFriendsView(socialFrame, nativeView)
                         online = online + 1
                     end
                 end
-                header.label:SetText(("%s  %d/%d"):format(section.label, online, #friends))
+                local style = Addon.GetSectionStyle(section.key)
+                header.label:SetText(("%s  %d/%d"):format(style.label or section.label, online, #friends))
+                header.label:SetTextColor(Addon.ColorRGB(style.textColor or "ffffff"))
+                local background = header:GetNormalTexture()
+                if style.backgroundColor then
+                    background:SetColorTexture(Addon.ColorRGB(style.backgroundColor))
+                else
+                    header:SetNormalAtlas("common-button-list-collapseExpand")
+                    background:SetVertexColor(1, 1, 1)
+                end
                 local isCollapsed = IsSectionCollapsed(section.key, playerRuleset)
                 header.icon:SetAtlas(isCollapsed and "common-button-list-plus" or "common-button-list-minus", true)
                 PositionRow(header, offset)
@@ -538,6 +550,11 @@ local function CreateFriendsView(socialFrame, nativeView)
         local query = search:GetText():lower():match("^%s*(.-)%s*$")
         groups = CollectFriends(query, filters)
         Render(groups)
+    end
+    Addon.Refresh = function()
+        if window:IsVisible() then
+            Refresh()
+        end
     end
 
     for _, section in ipairs(sections) do
@@ -614,7 +631,10 @@ end
 SLASH_BETTERFRIENDSLIST1 = "/bfl"
 SLASH_BETTERFRIENDSLIST2 = "/betterfriendslist"
 SlashCmdList.BETTERFRIENDSLIST = function(message)
-    if showBlizzard and SocialUIFrame.FriendsList:IsVisible() then
+    local command = ReadText(message):lower():match("^%s*(.-)%s*$")
+    if command == "options" or command == "settings" then
+        Addon.OpenOptions()
+    elseif showBlizzard and SocialUIFrame.FriendsList:IsVisible() then
         showBlizzard(ReadText(message):lower():match("^%s*blizzard%s*$") ~= nil)
     else
         print("Better Friends List: open the Friends tab in the Social window.")

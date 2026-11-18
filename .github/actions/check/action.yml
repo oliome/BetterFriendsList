@@ -1,0 +1,17 @@
+name: Addon checks
+description: Check the addon and the Forever update workflow
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: sudo apt-get update -qq && sudo apt-get install -y lua5.1
+    - shell: bash
+      run: |
+        set -euo pipefail
+        {
+          luac5.1 -p BetterFriendsList/*.lua
+          lua5.1 .github/tests/test.lua
+          bash .github/tests/update.sh
+          test "$(jq -r '.addon_version' .github/wow-version.json)" = "$(awk '/^## Version:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')"
+          test "$(jq -r '.interface' .github/wow-version.json)" = "$(awk '/^## Interface:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')"
+        } 2>&1 | tee test-results.txt

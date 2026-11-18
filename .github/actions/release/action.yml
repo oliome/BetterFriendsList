@@ -1,0 +1,27 @@
+name: Release addon
+description: Package the installable addon folder and upload it to GitHub Releases
+inputs:
+  tag:
+    required: true
+    description: Passing tag to release
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+        version=$(awk '/^## Version:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')
+        [[ $RELEASE_TAG == "v$version" || $RELEASE_TAG == "v$version"-beta.* ]]
+        mkdir -p .release
+        archive=".release/BetterFriendsList-$RELEASE_TAG.zip"
+        zip -r "$archive" BetterFriendsList -i '*.lua' '*.toc'
+        unzip -t "$archive"
+        flags=()
+        if [[ $RELEASE_TAG == *-beta.* ]]; then flags+=(--prerelease); fi
+        if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          gh release upload "$RELEASE_TAG" "$archive" --clobber
+        else
+          gh release create "$RELEASE_TAG" "$archive" --verify-tag --title "Better Friends List $RELEASE_TAG" --generate-notes "${flags[@]}"
+        fi

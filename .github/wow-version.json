@@ -1,0 +1,10 @@
+{
+  "product": "wowf",
+  "channel": "live",
+  "game_version": "1.60.1",
+  "region": "us",
+  "interface": 16001,
+  "build": 70938,
+  "addon_version": "0.1.10",
+  "runtime_ready": false
+}

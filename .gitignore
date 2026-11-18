@@ -1,0 +1,4 @@
+.release/
+.tooling/
+candidate.json
+test-results.txt
