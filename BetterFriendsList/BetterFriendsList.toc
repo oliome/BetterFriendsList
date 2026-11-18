@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Better Friends List
 ## Notes: Collapsible friend groups, faction labels, and ruleset comparisons for WoW: Forever.
-## Version: 0.1.10
+## Version: 0.1.11
 ## OptionalDeps: Blizzard_SocialUI
 ## SavedVariables: BetterFriendsListDB
 
