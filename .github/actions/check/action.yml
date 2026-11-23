@@ -9,9 +9,9 @@ runs:
       run: |
         set -euo pipefail
         {
-          luac5.1 -p BetterFriendsList/*.lua
+          luac5.1 -p BetterFriendsList.lua Options.lua
           lua5.1 .github/tests/test.lua
           bash .github/tests/update.sh
-          test "$(jq -r '.addon_version' .github/wow-version.json)" = "$(awk '/^## Version:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')"
-          test "$(jq -r '.interface' .github/wow-version.json)" = "$(awk '/^## Interface:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')"
+          test "$(jq -r '.addon_version' .github/wow-version.json)" = "$(awk '/^## Version:/ {print $3}' BetterFriendsList.toc | tr -d '\r')"
+          test "$(jq -r '.interface' .github/wow-version.json)" = "$(awk '/^## Interface:/ {print $3}' BetterFriendsList.toc | tr -d '\r')"
         } 2>&1 | tee test-results.txt

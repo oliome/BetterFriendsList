@@ -2,9 +2,9 @@
 set -euo pipefail
 repo=$(pwd -P)
 work="$repo/.tooling/update-test.$$"
-mkdir -p "$work/.github" "$work/BetterFriendsList"
+mkdir -p "$work/.github"
 cp .github/wow-version.json "$work/.github/wow-version.json"
-cp BetterFriendsList/BetterFriendsList.toc "$work/BetterFriendsList/BetterFriendsList.toc"
+cp BetterFriendsList.toc "$work/BetterFriendsList.toc"
 build=$(jq -r '.build' .github/wow-version.json)
 patch=$(jq -r '.game_version' .github/wow-version.json)
 interface=$(jq -r '.interface' .github/wow-version.json)
@@ -21,7 +21,7 @@ fixture "us|$((build+1))|$patch.$((build+1))"
 detect; stage
 jq -e --arg version "$version" --argjson build "$((build+1))" --argjson interface "$interface" '.addon_version!=$version and .build==$build and .interface==$interface' "$work/.github/wow-version.json" >/dev/null
 staged_version=$(jq -r '.addon_version' "$work/.github/wow-version.json")
-[[ $(awk '/^## Version:/ {print $3}' "$work/BetterFriendsList/BetterFriendsList.toc" | tr -d '\r') == "$staged_version" ]]
+[[ $(awk '/^## Version:/ {print $3}' "$work/BetterFriendsList.toc" | tr -d '\r') == "$staged_version" ]]
 grep -q "^tag=v$staged_version-beta.1$" "$work/outputs"
 cp "$work/.github/wow-version.json" "$work/checkpoint.json"
 stage

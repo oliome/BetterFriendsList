@@ -52,6 +52,28 @@ local rulesets = {
     pvp = "PvP",
     rp = "RP",
     rppvp = "RP-PvP",
+    roleplay = "RP",
+    roleplaying = "RP",
+    roleplaypvp = "RP-PvP",
+    roleplayingpvp = "RP-PvP",
+    rpvp = "RP-PvP",
+    normale = "Normal",
+    jcj = "PvP",
+    jxj = "PvP",
+    jdr = "RP",
+    gdr = "RP",
+    rollenspiel = "RP",
+    jdrjcj = "RP-PvP",
+    gdrpvp = "RP-PvP",
+    rollenspielpvp = "RP-PvP",
+    ["일반"] = "Normal",
+    ["普通"] = "Normal",
+    ["一般"] = "Normal",
+    ["전쟁"] = "PvP",
+    ["역할극"] = "RP",
+    ["角色扮演"] = "RP",
+    ["역할극전쟁"] = "RP-PvP",
+    ["角色扮演pvp"] = "RP-PvP",
 }
 
 local function IsReadable(value)
@@ -67,18 +89,29 @@ local function ReadText(value)
     return IsReadable(value) and type(value) == "string" and value or ""
 end
 
+local function NormalizeRulesetText(value)
+    return ReadText(value):gsub(" ", " "):gsub(" ", " "):gsub("‐", "-"):gsub("‑", "-")
+        :gsub("–", "-"):gsub("—", "-"):gsub("[A-Z]", function(letter)
+            return string.char(letter:byte() + 32)
+        end)
+end
+
 local function ParseRealmRuleset(value, requireForeverRealm)
-    local realm = ReadText(value):lower():match("^%s*(.-)%s*$")
-    -- Forever reports both spaced and normalized CAMWOW realm names.
-    local compactRealm = realm:gsub("[%s%-]", "")
-    local suffix = compactRealm:match("^camwow%a+%d+realm%d+([a-z]+)$")
-        or compactRealm:match("^camwow%a+%d+realm%d+([a-z]+)%([a-z]+%)%a*$")
-    if suffix or requireForeverRealm then
-        return rulesets[suffix]
+    local realm = NormalizeRulesetText(value):match("^%s*(.-)%s*$")
+    local compactRealm = realm:gsub("[%s%-:,]", "")
+    local suffix = compactRealm:match("^camwow%a+%d+realm%d+(.+)$")
+    if suffix then
+        -- Live realm labels can append a parenthesized type and population.
+        local label = suffix:match("^(.-)%(") or suffix
+        return rulesets[label]
     end
 
-    local label = compactRealm:gsub("^forever", ""):gsub("^realm", "")
-    return rulesets[label]
+    if requireForeverRealm then
+        return nil
+    end
+    local legacyType = compactRealm:match("^classicbeta([a-z]+)%d*$")
+    local label = compactRealm:gsub("^wowforever", ""):gsub("^forever", ""):gsub("^realm", "")
+    return rulesets[legacyType or label]
 end
 
 local function GetFriendRuleset(game)
@@ -87,14 +120,81 @@ local function GetFriendRuleset(game)
         return ruleset
     end
 
-    local presence = ReadText(game.richPresence):lower()
-    local label = presence:match("^forever %- (.-) %- %S")
-        or presence:match("^forever · (.-) · %S")
-    return ParseRealmRuleset(label) or ParseRealmRuleset(presence:match(".* %- (.+)$"), true)
+    local presence = NormalizeRulesetText(game.richPresence)
+    local normalized = presence:gsub("%s*·%s*", " - "):gsub("%s+%-%s+", " - ")
+    local product, detail = normalized:match("^%s*(.-) %- (.+)$")
+    if product == "forever" or product == "wow forever" or product == "wow: forever" then
+        local label = detail:match("^(.-) %- ") or detail
+        local ruleset = ParseRealmRuleset(label)
+        if ruleset then
+            return ruleset
+        end
+    end
+    return ParseRealmRuleset(normalized:match(".* %- (camwow.+)$"), true)
 end
 
 local function GetPlayerRuleset()
     return ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
+end
+
+local function GetRefreshedRuleset(game)
+    local id = game.gameAccountID
+    if not IsReadable(id) or type(id) ~= "number" or id <= 0 then
+        return nil
+    end
+    local fresh = C_BattleNet.GetGameAccountInfoByID(id)
+    if not IsReadableTable(fresh) or not IsReadable(fresh.gameAccountID) or fresh.gameAccountID ~= id
+        or ReadText(fresh.clientProgram) ~= BNET_CLIENT_WOW or not IsReadable(fresh.wowProjectID)
+        or fresh.wowProjectID ~= FOREVER_PROJECT or not IsReadable(fresh.isOnline) or not fresh.isOnline then
+        return nil
+    end
+    local guid, freshGuid = ReadText(game.playerGuid), ReadText(fresh.playerGuid)
+    if guid ~= "" and freshGuid ~= "" and guid ~= freshGuid then
+        return nil
+    end
+    return GetFriendRuleset(fresh)
+end
+
+local function GetRealmKey(game)
+    local region, realm = game.regionID, game.realmID
+    if IsReadable(region) and type(region) == "number" and region > 0
+        and IsReadable(realm) and type(realm) == "number" and realm > 0 then
+        return region .. ":" .. realm
+    end
+end
+
+local function ResolveMissingRulesets(groups)
+    local realmRulesets = {}
+    for _, section in ipairs(sections) do
+        for _, friend in ipairs(groups[section.key]) do
+            local key = friend.ruleset and GetRealmKey(friend.game)
+            if key then
+                local previous = realmRulesets[key]
+                realmRulesets[key] = (previous == nil or previous == friend.ruleset) and friend.ruleset or false
+            end
+        end
+    end
+    local unresolved = {}
+    local playerRuleset = GetPlayerRuleset()
+    local playerRealm = GetRealmID()
+    for _, friend in ipairs(groups.unknown) do
+        local game = friend.game
+        local key = GetRealmKey(game)
+        local ruleset = key and realmRulesets[key]
+        if not ruleset and playerRuleset and IsReadable(playerRealm) and type(playerRealm) == "number"
+            and playerRealm > 0 and IsReadable(game.realmID) and game.realmID == playerRealm
+            and IsReadable(game.isInCurrentRegion) and game.isInCurrentRegion == true then
+            ruleset = playerRuleset
+        end
+        if ruleset then
+            friend.ruleset = ruleset
+            local target = groups[ruleset]
+            target[#target + 1] = friend
+        else
+            unresolved[#unresolved + 1] = friend
+        end
+    end
+    groups.unknown = unresolved
 end
 
 local function ColorText(color, text)
@@ -180,12 +280,14 @@ local function CollectFriends(search, filters)
     end
     local total = BNGetNumFriends()
     if not IsReadable(total) or type(total) ~= "number" then
-        return groups
+        return groups, 0, 0
     end
 
+    local loaded = 0
     for index = 1, total do
         local account = C_BattleNet.GetFriendAccountInfo(index)
         if IsReadableTable(account) then
+            loaded = loaded + 1
             local level = account.friendLevel
             local game = account.gameAccountInfo
             game = IsReadableTable(game) and game or {}
@@ -200,7 +302,7 @@ local function CollectFriends(search, filters)
                 local isWoWFriend = IsReadable(level) and level == friendLevel.Title
                 local isForever = online and ReadText(game.clientProgram) == BNET_CLIENT_WOW
                     and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
-                local ruleset = isForever and GetFriendRuleset(game) or nil
+                local ruleset = isForever and (GetFriendRuleset(game) or GetRefreshedRuleset(game)) or nil
                 local friend = {
                     name = name,
                     sortName = sortName,
@@ -223,6 +325,8 @@ local function CollectFriends(search, filters)
         end
     end
 
+    ResolveMissingRulesets(groups)
+    Addon.unknownRulesets = groups.unknown
     for _, rows in pairs(groups) do
         table.sort(rows, function(a, b)
             if a.online ~= b.online then
@@ -231,7 +335,7 @@ local function CollectFriends(search, filters)
             return a.sortName < b.sortName
         end)
     end
-    return groups
+    return groups, total, loaded
 end
 
 local function PositionRow(frame, offset)
@@ -490,10 +594,15 @@ local function CreateFriendsView(socialFrame, nativeView)
 
     local filters = { status = {}, tags = {} }
     local showingBlizzard = false
+    local Refresh
     local function UpdateVisibility()
         local friendsVisible = nativeView:IsVisible() and not C_SocialRestrictions.IsFriendsDisabled()
+        local wasVisible = window:IsVisible()
         window:SetShown(friendsVisible and not showingBlizzard)
         launcher:SetShown(friendsVisible and showingBlizzard)
+        if wasVisible and window:IsVisible() then
+            Refresh()
+        end
     end
 
     local function Render(groups)
@@ -545,14 +654,48 @@ local function CreateFriendsView(socialFrame, nativeView)
         empty:SetShown(not hasFriends)
     end
 
-    local groups
-    local function Refresh()
+    local groups, retryTimer
+    local retryCount = 0
+    local function CancelRetry()
+        if retryTimer then
+            retryTimer:Cancel()
+            retryTimer = nil
+        end
+    end
+    Refresh = function()
+        CancelRetry()
         local query = search:GetText():lower():match("^%s*(.-)%s*$")
-        groups = CollectFriends(query, filters)
+        local total, loaded
+        groups, total, loaded = CollectFriends(query, filters)
         Render(groups)
+        local connected = BNConnected()
+        local pending = not connected or total == 0 or loaded < total
+        if pending and retryCount < 10 then
+            empty:SetText(connected and "Loading friends…" or "Connecting to Battle.net…")
+            retryTimer = C_Timer.NewTimer(1, function()
+                retryTimer = nil
+                retryCount = retryCount + 1
+                if window:IsVisible() then
+                    Refresh()
+                end
+            end)
+        else
+            if not connected then
+                empty:SetText("Battle.net is disconnected.")
+            elseif loaded < total then
+                empty:SetText("Friend data is still loading. Type /bfl refresh to retry.")
+            else
+                empty:SetText("No friends match your search or filters.")
+            end
+        end
+        if not pending then
+            retryCount = 0
+        end
+        Addon.status = ("Battle.net %s, friends %d, loaded %d"):format(connected and "connected" or "disconnected", total, loaded)
     end
     Addon.Refresh = function()
         if window:IsVisible() then
+            retryCount = 0
             Refresh()
         end
     end
@@ -584,8 +727,12 @@ local function CreateFriendsView(socialFrame, nativeView)
     end
     search.OnSearchTextChanged = RefreshFromTop
     SetupFilterMenu(filter, filters, RefreshFromTop)
-    window:SetScript("OnShow", Refresh)
+    window:SetScript("OnShow", function()
+        retryCount = 0
+        Refresh()
+    end)
     window:SetScript("OnHide", function()
+        CancelRetry()
         search:ClearFocus()
     end)
     window:SetScript("OnEvent", function(self, event)
@@ -593,6 +740,7 @@ local function CreateFriendsView(socialFrame, nativeView)
             wipe(filters.tags)
         end
         if self:IsVisible() and (event ~= "SOCIAL_QUEUE_UPDATE" or filters.status.queued or filters.status.joinable) then
+            retryCount = 0
             Refresh()
         end
     end)
@@ -600,6 +748,10 @@ local function CreateFriendsView(socialFrame, nativeView)
     window:RegisterEvent("BN_FRIEND_INFO_CHANGED")
     window:RegisterEvent("BN_CONNECTED")
     window:RegisterEvent("BN_DISCONNECTED")
+    window:RegisterEvent("BN_INFO_CHANGED")
+    window:RegisterEvent("BN_FRIEND_ACCOUNT_ONLINE")
+    window:RegisterEvent("BN_FRIEND_ACCOUNT_OFFLINE")
+    window:RegisterEvent("PLAYER_ENTERING_WORLD")
     window:RegisterEvent("BATTLE_NET_FRIEND_TAG_ENABLED_STATUS_UPDATED")
     window:RegisterEvent("SOCIAL_QUEUE_UPDATE")
     -- Observe Blizzard's view changes without modifying its frames or refresh path.
@@ -634,6 +786,23 @@ SlashCmdList.BETTERFRIENDSLIST = function(message)
     local command = ReadText(message):lower():match("^%s*(.-)%s*$")
     if command == "options" or command == "settings" then
         Addon.OpenOptions()
+    elseif command == "rulesets" then
+        print("Better Friends List rulesets: player realm=" .. ReadText(GetRealmName())
+            .. ", realmID=" .. tostring(GetRealmID()))
+        for index, friend in ipairs(Addon.unknownRulesets or {}) do
+            if index > 3 then break end
+            local game = friend.game
+            for _, field in ipairs({"realmName", "realmDisplayName", "richPresence", "realmID", "regionID", "gameAccountID"}) do
+                local value = game[field]
+                local readable = IsReadable(value) and (type(value) == "string" or type(value) == "number")
+                print("Unknown " .. index .. " " .. field .. "=" .. (readable and tostring(value):gsub("|", "||"):sub(1, 180) or "<unavailable>"))
+            end
+        end
+    elseif command == "status" then
+        print("Better Friends List " .. (C_AddOns.GetAddOnMetadata("BetterFriendsList", "Version") or "") .. ": "
+            .. (Addon.status or "Open the Friends window to load the list."))
+    elseif command == "refresh" and Addon.Refresh then
+        Addon.Refresh()
     elseif showBlizzard and SocialUIFrame.FriendsList:IsVisible() then
         showBlizzard(ReadText(message):lower():match("^%s*blizzard%s*$") ~= nil)
     else

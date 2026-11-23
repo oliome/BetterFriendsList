@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 state=.github/wow-version.json
-toc=BetterFriendsList/BetterFriendsList.toc
+toc=BetterFriendsList.toc
 candidate=candidate.json
 output() { if [[ -n ${GITHUB_OUTPUT:-} ]]; then printf '%s\n' "$1" >> "$GITHUB_OUTPUT"; else printf '%s\n' "$1"; fi; }
 fail() { echo "$*" >&2; exit 1; }

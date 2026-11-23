@@ -5,6 +5,6 @@
   "region": "us",
   "interface": 16001,
   "build": 71037,
-  "addon_version": "0.1.12",
+  "addon_version": "0.1.13",
   "runtime_ready": false
 }
