@@ -133,8 +133,29 @@ local function GetFriendRuleset(game)
     return ParseRealmRuleset(normalized:match(".* %- (camwow.+)$"), true)
 end
 
+local function ReadGameRule(name)
+    local rule = Enum.GameRule and Enum.GameRule[name]
+    if not rule or not C_GameRules or not C_GameRules.IsGameRuleActive then
+        return nil
+    end
+    local ok, active = pcall(C_GameRules.IsGameRuleActive, rule)
+    if ok and IsReadable(active) and type(active) == "boolean" then
+        return active
+    end
+end
+
 local function GetPlayerRuleset()
-    return ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
+    local ruleset = ParseRealmRuleset(GetRealmName()) or ParseRealmRuleset(GetNormalizedRealmName())
+    if ruleset then
+        return ruleset
+    end
+    local pvp, rp = ReadGameRule("PvPRuleset"), ReadGameRule("RPRuleset")
+    if pvp ~= nil and rp ~= nil and ReadGameRule("HardcoreRuleset") == false then
+        if pvp then
+            return rp and "RP-PvP" or "PvP"
+        end
+        return rp and "RP" or "Normal"
+    end
 end
 
 local function GetRefreshedRuleset(game)
@@ -329,6 +350,9 @@ local function CollectFriends(search, filters)
     Addon.unknownRulesets = groups.unknown
     for _, rows in pairs(groups) do
         table.sort(rows, function(a, b)
+            if a.isWoWFriend ~= b.isWoWFriend then
+                return a.isWoWFriend
+            end
             if a.online ~= b.online then
                 return a.online
             end
@@ -403,6 +427,7 @@ end
 
 local function DisplayFriend(row, friend, playerRuleset)
     local game = friend.game
+    local classColor = RAID_CLASS_COLORS and RAID_CLASS_COLORS[ReadText(game.classFilename)]
     local client = ReadText(game.clientProgram)
     local faction = client == BNET_CLIENT_WOW and ReadText(game.factionName)
     local background = friend.isWoWFriend and faction ~= "Alliance" and "friends-card-default" or "friends-card-battleNet"
@@ -411,7 +436,9 @@ local function DisplayFriend(row, friend, playerRuleset)
     local presence = friend.away and "away" or (friend.busy and "busy" or "online")
     row.presence:SetAtlas("friends-status-" .. (friend.online and presence or "offline"))
     row.name:SetText(friend.name)
-    if friend.isWoWFriend then
+    if friend.isWoWFriend and classColor then
+        row.name:SetTextColor(classColor.r, classColor.g, classColor.b)
+    elseif friend.isWoWFriend then
         row.name:SetTextColor(1, 1, 1)
     else
         row.name:SetTextColor(0.51, 0.77, 1)
@@ -426,8 +453,7 @@ local function DisplayFriend(row, friend, playerRuleset)
         end
         local className = ReadText(game.className)
         if className ~= "" then
-            local color = RAID_CLASS_COLORS and RAID_CLASS_COLORS[ReadText(game.classFilename)]
-            character = character .. "  " .. (color and color:WrapTextInColorCode(className) or className)
+            character = character .. "  " .. (classColor and classColor:WrapTextInColorCode(className) or className)
         end
     else
         character = ""
@@ -448,7 +474,11 @@ local function DisplayFriend(row, friend, playerRuleset)
         row.details:SetText("")
         row.character:SetTextColor(0.63, 0.65, 0.67)
     else
-        row.character:SetTextColor(1, 0.82, 0)
+        if friend.isWoWFriend and classColor then
+            row.character:SetTextColor(classColor.r, classColor.g, classColor.b)
+        else
+            row.character:SetTextColor(1, 0.82, 0)
+        end
         row.details:SetText(status)
     end
     row.details:SetTextColor(0.63, 0.65, 0.67)
@@ -752,6 +782,7 @@ local function CreateFriendsView(socialFrame, nativeView)
     window:RegisterEvent("BN_FRIEND_ACCOUNT_ONLINE")
     window:RegisterEvent("BN_FRIEND_ACCOUNT_OFFLINE")
     window:RegisterEvent("PLAYER_ENTERING_WORLD")
+    window:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     window:RegisterEvent("BATTLE_NET_FRIEND_TAG_ENABLED_STATUS_UPDATED")
     window:RegisterEvent("SOCIAL_QUEUE_UPDATE")
     -- Observe Blizzard's view changes without modifying its frames or refresh path.

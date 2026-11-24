@@ -74,6 +74,7 @@ function methods:CreateTexture() return CreateFrame("Texture", nil, self) end
 function methods:CreateFontString() return CreateFrame("FontString", nil, self) end
 function methods:SetColorTexture(...) self.color = {...} end
 function methods:SetNormalAtlas(atlas) self.normalTexture.atlas = atlas end
+function methods:SetTextColor(...) self.textColor = {...} end
 
 WOW_PROJECT_ID, BNET_CLIENT_WOW = 18, "WoW"
 Enum = {BattleNetFriendLevel = {Title = 3}, TitleIconVersion = {Small = 1}}
@@ -120,6 +121,8 @@ contacts = {
     Contact("Battle unknown", 1, "", true),
     Contact("Offline", 3, "", false),
 }
+RAID_CLASS_COLORS = {SHAMAN = {r = 0, g = 0.44, b = 0.87}}
+contacts[1].gameAccountInfo.classFilename = "SHAMAN"
 function BNGetNumFriends() return reportedTotal or #contacts end
 C_BattleNet = {
     GetFriendAccountInfo = function(index) return not pendingAccounts and contacts[index] or nil end,
@@ -149,11 +152,28 @@ local function Click(frame) assert(frame.scripts.OnClick)(frame) end
 assert(#Addon.sections == 6)
 assert(FindText("WoW: Forever — RP-PvP  2/2"), "Title and Battle.net friends must share the same section")
 assert(FindText("Title same") and FindText("Battle same"))
+local titleName = FindText("Title same")
+assert(titleName.textColor[2] == 0.44 and titleName.parent.character.textColor[3] == 0.87,
+    "In-game friends must use their class color for the account and character names")
+assert(titleName.parent.offset > FindText("Battle same").parent.offset,
+    "In-game friends must sort before Battle.net friends even when their names sort later")
 assert(not FindText("Title other") and not FindText("Offline"), "Other sections start collapsed")
 assert(FindText("WoW: Forever — Unknown Ruleset  1/1"))
 local same = FindText("WoW: Forever — RP-PvP  2/2").parent
 local normal = FindText("WoW: Forever — Normal  1/1").parent
 assert(same.offset > normal.offset, "Current ruleset must be first")
+local originalRealm = realm
+realm = "Unnamed shard"
+Enum.GameRule = {PvPRuleset = 1, RPRuleset = 2, HardcoreRuleset = 3}
+local gameRules = {[1] = true, [2] = true, [3] = false}
+C_GameRules = {IsGameRuleActive = function(rule) return gameRules[rule] end}
+Addon.Refresh()
+assert(same.offset > normal.offset and FindText("Title same"), "RP-PvP game rules must select and expand the current section")
+gameRules[1], gameRules[2] = false, false
+Addon.Refresh()
+assert(normal.offset > same.offset and FindText("Title other"), "Normal game rules must reorder and expand the current section")
+realm = originalRealm
+Addon.Refresh()
 
 -- Cover realm labels and explicit presence formats outside the original CAMWOW form.
 local originalContacts = contacts
