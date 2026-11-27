@@ -10,8 +10,10 @@ local connected, reportedTotal, pendingAccounts = true, nil, false
 local timers = {}
 local rightMouseDown = false
 local nativeLinkClick = function() end
+local failFriendLinks = false
 function IsMouseButtonDown() return rightMouseDown end
-STANDARD_TEXT_FONT = "MockFont"
+STANDARD_TEXT_FONT = nil
+GameFontNormal = {GetFont = function() return "LocaleFont", 12, "" end}
 function BNConnected() return connected end
 C_Timer = {NewTimer = function(_, callback)
     local timer = {callback = callback}
@@ -25,7 +27,7 @@ for _, name in ipairs({
     "SetBackdropColor", "SetSize", "SetHeight", "SetWidth", "SetAutoFocus", "SetTextColor",
     "SetJustifyH", "SetWordWrap", "SetAlpha", "SetColorTexture", "SetGradient",
     "SetNormalAtlas", "SetHighlightAtlas", "SetScrollChild", "SetMaxLetters", "RegisterEvent",
-    "UnregisterAllEvents", "SetClampedToScreen", "SetFrameStrata", "SetClipsChildren", "SetJustifyV",
+    "UnregisterAllEvents", "SetClampedToScreen", "SetFrameStrata", "SetClipsChildren", "SetJustifyV", "SetFontObject",
 }) do
     methods[name] = function() end
 end
@@ -35,7 +37,10 @@ end
 function methods:ClearAllPoints() end
 function methods:SetText(value) self.text = value end
 function methods:SetFormattedText(format, ...) self.text = format:format(...) end
-function methods:SetFont(_, size) self.fontSize = size end
+function methods:SetFont(font, size)
+    assert(font == "LocaleFont", "Use the active locale font")
+    self.fontSize = size
+end
 function methods:GetLineHeight() return self.fontSize end
 function methods:GetText() return self.text or "" end
 function methods:GetFrameLevel() return 5 end
@@ -69,6 +74,9 @@ end
 function methods:GetNormalTexture() return self.normalTexture end
 function methods:SetVertexColor(...) self.vertex = {...} end
 function CreateFrame(kind, name, parent, template)
+    if failFriendLinks and template == "BetterFriendsListFriendLinkTemplate" then
+        error("Mock missing hyperlink template")
+    end
     local frame = setmetatable({kind = kind, name = name, parent = parent, shown = true, scripts = {}}, {__index = methods})
     frames[#frames + 1] = frame
     if template == "BasicFrameTemplateWithInset" then
@@ -265,6 +273,21 @@ contacts = originalContacts
 Addon.Refresh()
 Click(normal)
 assert(FindText("Title other"))
+
+-- A missing optional menu template must never abort friend-card rendering.
+failFriendLinks = true
+contacts = {}
+for index = 1, 20 do
+    contacts[index] = Contact("Visible without menu " .. index, 1, "RP-PvP", true)
+end
+Addon.Refresh()
+assert(FindText("WoW: Forever — RP-PvP  20/20"))
+assert(FindText("Visible without menu 20"), "All cards must render despite menu initialization failures")
+assert(not FindText("No friends to display."))
+assert(Addon.menuError and Addon.menuError:find("Mock missing hyperlink template", 1, true))
+failFriendLinks = false
+contacts = originalContacts
+Addon.Refresh()
 
 -- Editing settings exercises saved overrides, reset, picker cancellation, and reused headers.
 BetterFriendsListDB = {sections = {Normal = {textColor = "bad", backgroundColor = false}, other = false}}

@@ -391,10 +391,11 @@ local function LayoutFriendLink(link, height)
     end
     local text = link.Text
     local size = math.max(1, math.ceil(height))
-    text:SetFont(STANDARD_TEXT_FONT, size, "")
+    local font = GameFontNormal:GetFont()
+    text:SetFont(font, size, "")
     while text:GetLineHeight() > height and size > 1 do
         size = math.max(1, math.min(size - 1, math.floor(size * height / text:GetLineHeight())))
-        text:SetFont(STANDARD_TEXT_FONT, size, "")
+        text:SetFont(font, size, "")
     end
     text:SetPoint("BOTTOMRIGHT", link, "BOTTOMRIGHT", size * 2 + 12, 0)
 end
@@ -428,6 +429,44 @@ local function BindFriendLink(row, friend)
         name, id, name, string.rep("M", 64))
     link.accountID = id
     link:Show()
+end
+
+local function UpdateFriendLink(row, friend)
+    if not row.FriendLink then
+        local link = CreateFrame("Frame", nil, row, "BetterFriendsListFriendLinkTemplate")
+        row.FriendLink = link
+        link:Hide()
+        link:SetAllPoints()
+        link:SetClipsChildren(true)
+        link:SetScript("OnHyperlinkEnter", nil)
+        link:SetScript("OnHyperlinkLeave", nil)
+        link.Text = link:CreateFontString(nil, "ARTWORK")
+        link.Text:SetFontObject(GameFontNormal)
+        link.Text:SetText("M")
+        link.Text:SetJustifyH("LEFT")
+        link.Text:SetJustifyV("MIDDLE")
+        link.Text:SetWordWrap(false)
+        link.Text:SetAlpha(0)
+        link.Text:SetPoint("TOPLEFT")
+        link:SetScript("OnSizeChanged", function(self, _, height)
+            local ok, err = pcall(LayoutFriendLink, self, height)
+            if not ok then
+                row.menuFailed = true
+                Addon.menuError = tostring(err)
+                self:Hide()
+            end
+        end)
+        link:HookScript("OnMouseDown", function(self, button)
+            if button == "RightButton" then
+                self.pressedID = self.accountID
+            end
+        end)
+        link:HookScript("OnMouseUp", function(self)
+            self.pressedID = nil
+        end)
+        LayoutFriendLink(link, 70)
+    end
+    BindFriendLink(row, friend)
 end
 
 local function CreateRow(parent)
@@ -470,30 +509,6 @@ local function CreateRow(parent)
     row.details:SetJustifyH("LEFT")
     row.details:SetWordWrap(false)
 
-    local link = CreateFrame("Frame", nil, row, "BetterFriendsListFriendLinkTemplate")
-    link:SetAllPoints()
-    link:SetClipsChildren(true)
-    link:SetScript("OnHyperlinkEnter", nil)
-    link:SetScript("OnHyperlinkLeave", nil)
-    link.Text = link:CreateFontString(nil, "ARTWORK")
-    link.Text:SetJustifyH("LEFT")
-    link.Text:SetJustifyV("MIDDLE")
-    link.Text:SetWordWrap(false)
-    link.Text:SetAlpha(0)
-    link.Text:SetPoint("TOPLEFT")
-    link:SetScript("OnSizeChanged", function(self, _, height)
-        LayoutFriendLink(self, height)
-    end)
-    link:HookScript("OnMouseDown", function(self, button)
-        if button == "RightButton" then
-            self.pressedID = self.accountID
-        end
-    end)
-    link:HookScript("OnMouseUp", function(self)
-        self.pressedID = nil
-    end)
-    row.FriendLink = link
-    LayoutFriendLink(link, 70)
     return row
 end
 
@@ -569,8 +584,17 @@ local function DisplayFriend(row, friend, playerRuleset)
         row.crest:SetAtlas(crest, false)
     end
     row.crest:SetShown(not not crest)
-    BindFriendLink(row, friend)
     row:Show()
+    if not row.menuFailed then
+        local ok, err = pcall(UpdateFriendLink, row, friend)
+        if not ok then
+            row.menuFailed = true
+            Addon.menuError = tostring(err)
+            if row.FriendLink then
+                row.FriendLink:Hide()
+            end
+        end
+    end
 end
 
 local function SetupFilterMenu(filter, filters, refresh)
@@ -905,6 +929,9 @@ SlashCmdList.BETTERFRIENDSLIST = function(message)
     elseif command == "status" then
         print("Better Friends List " .. (C_AddOns.GetAddOnMetadata("BetterFriendsList", "Version") or "") .. ": "
             .. (Addon.status or "Open the Friends window to load the list."))
+        if Addon.menuError then
+            print("Better Friends List menu error: " .. Addon.menuError)
+        end
     elseif command == "refresh" and Addon.Refresh then
         Addon.Refresh()
     elseif showBlizzard and SocialUIFrame.FriendsList:IsVisible() then
