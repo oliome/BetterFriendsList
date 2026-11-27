@@ -4,7 +4,7 @@ import sys
 import zipfile
 
 root = Path(__file__).resolve().parent.parent
-files = ["BetterFriendsList.toc", "BetterFriendsList.lua", "Options.lua"]
+files = ["BetterFriendsList.toc", "BetterFriendsList.lua", "Options.lua", "FriendLink.xml"]
 destination = Path(sys.argv[1])
 destination.parent.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED) as archive:

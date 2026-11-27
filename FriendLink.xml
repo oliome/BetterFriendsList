@@ -1,0 +1,5 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <Frame name="BetterFriendsListFriendLinkTemplate" inherits="InlineHyperlinkFrameTemplate"
+        virtual="true" enableMouse="true" passThroughButtons="LeftButton, Button3, Button4, Button5"
+        propagateMouseInput="Motion"/>
+</Ui>

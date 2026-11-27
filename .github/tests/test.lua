@@ -8,6 +8,10 @@ local tagEnabled = true
 local picker
 local connected, reportedTotal, pendingAccounts = true, nil, false
 local timers = {}
+local rightMouseDown = false
+local nativeLinkClick = function() end
+function IsMouseButtonDown() return rightMouseDown end
+STANDARD_TEXT_FONT = "MockFont"
 function BNConnected() return connected end
 C_Timer = {NewTimer = function(_, callback)
     local timer = {callback = callback}
@@ -21,7 +25,7 @@ for _, name in ipairs({
     "SetBackdropColor", "SetSize", "SetHeight", "SetWidth", "SetAutoFocus", "SetTextColor",
     "SetJustifyH", "SetWordWrap", "SetAlpha", "SetColorTexture", "SetGradient",
     "SetNormalAtlas", "SetHighlightAtlas", "SetScrollChild", "SetMaxLetters", "RegisterEvent",
-    "UnregisterAllEvents", "SetClampedToScreen", "SetFrameStrata",
+    "UnregisterAllEvents", "SetClampedToScreen", "SetFrameStrata", "SetClipsChildren", "SetJustifyV",
 }) do
     methods[name] = function() end
 end
@@ -30,6 +34,9 @@ function methods:SetPoint(point, relative, relativePoint, x, y)
 end
 function methods:ClearAllPoints() end
 function methods:SetText(value) self.text = value end
+function methods:SetFormattedText(format, ...) self.text = format:format(...) end
+function methods:SetFont(_, size) self.fontSize = size end
+function methods:GetLineHeight() return self.fontSize end
 function methods:GetText() return self.text or "" end
 function methods:GetFrameLevel() return 5 end
 function methods:GetWidth() return 370 end
@@ -66,6 +73,9 @@ function CreateFrame(kind, name, parent, template)
     frames[#frames + 1] = frame
     if template == "BasicFrameTemplateWithInset" then
         frame.TitleText = CreateFrame("FontString", nil, frame)
+    end
+    if template == "BetterFriendsListFriendLinkTemplate" then
+        frame.scripts.OnHyperlinkClick = nativeLinkClick
     end
     frame.normalTexture = setmetatable({scripts = {}, shown = true}, {__index = methods})
     return frame
@@ -108,8 +118,10 @@ end}
 SocialUIAddFriendButtonMixin = {}
 local contacts = {}
 local freshAccounts = {}
+local nextAccountID = 100
 local function Contact(name, level, ruleset, online)
-    return {accountName = name, friendLevel = level, gameAccountInfo = {
+    nextAccountID = nextAccountID + 1
+    return {bnetAccountID = nextAccountID, accountName = name, friendLevel = level, gameAccountInfo = {
         isOnline = online, clientProgram = "WoW", wowProjectID = 18, realmName = ruleset,
         characterName = name, playerGuid = name,
     }}
@@ -157,6 +169,10 @@ assert(titleName.textColor[2] == 0.44 and titleName.parent.character.textColor[3
     "In-game friends must use their class color for the account and character names")
 assert(titleName.parent.offset > FindText("Battle same").parent.offset,
     "In-game friends must sort before Battle.net friends even when their names sort later")
+local link = titleName.parent.FriendLink
+assert(link:IsVisible() and link.accountID == contacts[1].bnetAccountID)
+assert(link.scripts.OnHyperlinkClick == nativeLinkClick, "Blizzard's hyperlink click script must stay inherited")
+assert(link.Text:GetText():find("|HBNplayer:Title same:" .. contacts[1].bnetAccountID .. ":0:BN_WHISPER:Title same|h", 1, true))
 assert(not FindText("Title other") and not FindText("Offline"), "Other sections start collapsed")
 assert(FindText("WoW: Forever — Unknown Ruleset  1/1"))
 local same = FindText("WoW: Forever — RP-PvP  2/2").parent
@@ -228,6 +244,24 @@ Addon.Refresh()
 assert(FindText("WoW: Forever — RP-PvP  1/1"), "Fresh metadata for another character must not be used")
 contacts = originalContacts
 freshAccounts = {}
+Addon.Refresh()
+
+-- Row reuse must replace the link identity and suspend a click held during a refresh.
+local heldRow = FindText("Title same").parent
+local heldLink = heldRow.FriendLink
+rightMouseDown = true
+heldLink.scripts.OnMouseDown(heldLink, "RightButton")
+contacts = {Contact("New friend", 3, "RP-PvP", true)}
+Addon.Refresh()
+assert(not heldLink:IsVisible(), "Rebinding a pressed row must cancel its old link")
+rightMouseDown = false
+heldRow.scripts.OnUpdate(heldRow)
+assert(heldLink:IsVisible() and heldLink.accountID == contacts[1].bnetAccountID)
+assert(not heldLink.Text:GetText():find("Title same", 1, true))
+contacts[1].accountName = "Unsafe:payload"
+Addon.Refresh()
+assert(not heldLink:IsVisible(), "Link delimiters in names must not enter a hyperlink")
+contacts = originalContacts
 Addon.Refresh()
 Click(normal)
 assert(FindText("Title other"))

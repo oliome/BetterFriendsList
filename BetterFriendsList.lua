@@ -325,6 +325,8 @@ local function CollectFriends(search, filters)
                     and IsReadable(game.wowProjectID) and game.wowProjectID == FOREVER_PROJECT
                 local ruleset = isForever and (GetFriendRuleset(game) or GetRefreshedRuleset(game)) or nil
                 local friend = {
+                    bnetAccountID = account.bnetAccountID,
+                    accountName = account.accountName,
                     name = name,
                     sortName = sortName,
                     character = character,
@@ -383,6 +385,51 @@ local function CreateSectionHeader(parent)
     return header
 end
 
+local function LayoutFriendLink(link, height)
+    if height <= 0 then
+        return
+    end
+    local text = link.Text
+    local size = math.max(1, math.ceil(height))
+    text:SetFont(STANDARD_TEXT_FONT, size, "")
+    while text:GetLineHeight() > height and size > 1 do
+        size = math.max(1, math.min(size - 1, math.floor(size * height / text:GetLineHeight())))
+        text:SetFont(STANDARD_TEXT_FONT, size, "")
+    end
+    text:SetPoint("BOTTOMRIGHT", link, "BOTTOMRIGHT", size * 2 + 12, 0)
+end
+
+local function BindFriendLink(row, friend)
+    local link, id, name = row.FriendLink, friend.bnetAccountID, friend.accountName
+    row.friendData = friend
+    if link.pressedID and link.pressedID ~= id then
+        link:Hide()
+        row:SetScript("OnUpdate", function(self)
+            if not IsMouseButtonDown("RightButton") then
+                self:SetScript("OnUpdate", nil)
+                link.pressedID = nil
+                BindFriendLink(self, self.friendData)
+            end
+        end)
+        return
+    end
+    local validID = IsReadable(id) and type(id) == "number" and id > 0 and id < math.huge and id % 1 == 0
+    local validName = not IsReadable(name) or (type(name) == "string" and name ~= ""
+        and not name:find("[:%c]") and (not name:find("|", 1, true) or name:match("^|K[%w]+|k$")))
+    if not validID or not validName then
+        link:Hide()
+        link.Text:SetText("")
+        link.accountID = nil
+        return
+    end
+    -- Blizzard's inherited OnHyperlinkClick handles the hardware click in its own context.
+    -- SetFormattedText also supports protected account names without concatenating them.
+    link.Text:SetFormattedText("|HBNplayer:%s:%d:0:BN_WHISPER:%s|h%s|h",
+        name, id, name, string.rep("M", 64))
+    link.accountID = id
+    link:Show()
+end
+
 local function CreateRow(parent)
     local row = CreateFrame("Frame", nil, parent)
     row:SetHeight(70)
@@ -422,6 +469,31 @@ local function CreateRow(parent)
     row.details:SetPoint("RIGHT", row.crest, "LEFT", -7, 0)
     row.details:SetJustifyH("LEFT")
     row.details:SetWordWrap(false)
+
+    local link = CreateFrame("Frame", nil, row, "BetterFriendsListFriendLinkTemplate")
+    link:SetAllPoints()
+    link:SetClipsChildren(true)
+    link:SetScript("OnHyperlinkEnter", nil)
+    link:SetScript("OnHyperlinkLeave", nil)
+    link.Text = link:CreateFontString(nil, "ARTWORK")
+    link.Text:SetJustifyH("LEFT")
+    link.Text:SetJustifyV("MIDDLE")
+    link.Text:SetWordWrap(false)
+    link.Text:SetAlpha(0)
+    link.Text:SetPoint("TOPLEFT")
+    link:SetScript("OnSizeChanged", function(self, _, height)
+        LayoutFriendLink(self, height)
+    end)
+    link:HookScript("OnMouseDown", function(self, button)
+        if button == "RightButton" then
+            self.pressedID = self.accountID
+        end
+    end)
+    link:HookScript("OnMouseUp", function(self)
+        self.pressedID = nil
+    end)
+    row.FriendLink = link
+    LayoutFriendLink(link, 70)
     return row
 end
 
@@ -497,6 +569,7 @@ local function DisplayFriend(row, friend, playerRuleset)
         row.crest:SetAtlas(crest, false)
     end
     row.crest:SetShown(not not crest)
+    BindFriendLink(row, friend)
     row:Show()
 end
 
