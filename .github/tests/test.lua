@@ -36,6 +36,7 @@ function methods:SetPoint(point, relative, relativePoint, x, y)
 end
 function methods:ClearAllPoints() end
 function methods:SetText(value) self.text = value end
+function methods:SetPassThroughButtons(...) self.passThrough = {...} end
 function methods:SetFormattedText(format, ...) self.text = format:format(...) end
 function methods:SetFont(font, size)
     assert(font == "LocaleFont", "Use the active locale font")
@@ -74,7 +75,10 @@ end
 function methods:GetNormalTexture() return self.normalTexture end
 function methods:SetVertexColor(...) self.vertex = {...} end
 function CreateFrame(kind, name, parent, template)
-    if failFriendLinks and template == "BetterFriendsListFriendLinkTemplate" then
+    if template == "BetterFriendsListFriendLinkTemplate" then
+        error("The removed custom template must never be requested")
+    end
+    if failFriendLinks and template == "InlineHyperlinkFrameTemplate" then
         error("Mock missing hyperlink template")
     end
     local frame = setmetatable({kind = kind, name = name, parent = parent, shown = true, scripts = {}}, {__index = methods})
@@ -82,7 +86,7 @@ function CreateFrame(kind, name, parent, template)
     if template == "BasicFrameTemplateWithInset" then
         frame.TitleText = CreateFrame("FontString", nil, frame)
     end
-    if template == "BetterFriendsListFriendLinkTemplate" then
+    if template == "InlineHyperlinkFrameTemplate" then
         frame.scripts.OnHyperlinkClick = nativeLinkClick
     end
     frame.normalTexture = setmetatable({scripts = {}, shown = true}, {__index = methods})
@@ -161,7 +165,7 @@ SocialUIFrame.FriendsList = CreateFrame("Frame", nil, SocialUIFrame)
 function SocialUIFrame:SetActiveContentFrame() end
 
 for _, file in ipairs({"Options.lua", "BetterFriendsList.lua"}) do
-    assert(loadfile(file))("BetterFriendsList", Addon)
+    assert(loadfile("BetterFriendsList/" .. file))("BetterFriendsList", Addon)
 end
 local function FindText(text)
     for _, frame in ipairs(frames) do
@@ -179,10 +183,23 @@ assert(titleName.parent.offset > FindText("Battle same").parent.offset,
     "In-game friends must sort before Battle.net friends even when their names sort later")
 local link = titleName.parent.FriendLink
 assert(link:IsVisible() and link.accountID == contacts[1].bnetAccountID)
+assert(link.passThrough[1] == "LeftButton" and #link.passThrough == 4)
 assert(link.scripts.OnHyperlinkClick == nativeLinkClick, "Blizzard's hyperlink click script must stay inherited")
 assert(link.Text:GetText():find("|HBNplayer:Title same:" .. contacts[1].bnetAccountID .. ":0:BN_WHISPER:Title same|h", 1, true))
 assert(not FindText("Title other") and not FindText("Offline"), "Other sections start collapsed")
 assert(FindText("WoW: Forever — Unknown Ruleset  1/1"))
+local tooltipLines = {}
+GameTooltip = {
+    SetOwner = function() end,
+    SetText = function(_, text) tooltipLines = {text} end,
+    AddLine = function(_, text) tooltipLines[#tooltipLines + 1] = text end,
+    Show = function() end,
+    Hide = function() end,
+}
+local unknownHeader = FindText("WoW: Forever — Unknown Ruleset  1/1").parent
+unknownHeader.scripts.OnEnter(unknownHeader)
+assert(tooltipLines[2]:find("available game data", 1, true))
+unknownHeader.scripts.OnLeave()
 local same = FindText("WoW: Forever — RP-PvP  2/2").parent
 local normal = FindText("WoW: Forever — Normal  1/1").parent
 assert(same.offset > normal.offset, "Current ruleset must be first")

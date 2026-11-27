@@ -12,7 +12,7 @@ runs:
         RELEASE_TAG: ${{ inputs.tag }}
       run: |
         set -euo pipefail
-        version=$(awk '/^## Version:/ {print $3}' BetterFriendsList.toc | tr -d '\r')
+        version=$(awk '/^## Version:/ {print $3}' BetterFriendsList/BetterFriendsList.toc | tr -d '\r')
         [[ $RELEASE_TAG == "v$version" || $RELEASE_TAG == "v$version"-beta.* ]]
         mkdir -p .release
         archive=".release/BetterFriendsList-$RELEASE_TAG.zip"

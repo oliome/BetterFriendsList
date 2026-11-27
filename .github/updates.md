@@ -1,6 +1,6 @@
 # Forever update automation
 
-The Lua files and TOC live at the repository root. The release packager places them in one `BetterFriendsList/` directory inside the install ZIP.
+The installable Lua and TOC files live in `BetterFriendsList/`. Development tools and workflows live in `.github/`. Release ZIPs contain one `BetterFriendsList/` directory.
 
 The hourly workflow follows FriendlyNameplateGuild's build detection and failure reporting. It reads Blizzard's live `wowf` version table. A newer build of the known patch increments the addon patch version, runs the checks, pushes a commit and tag atomically, and publishes an installable ZIP to GitHub Releases. Unchanged builds stay quiet. Failed checks open a deduplicated issue.
 

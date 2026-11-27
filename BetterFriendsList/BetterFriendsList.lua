@@ -433,10 +433,12 @@ end
 
 local function UpdateFriendLink(row, friend)
     if not row.FriendLink then
-        local link = CreateFrame("Frame", nil, row, "BetterFriendsListFriendLinkTemplate")
+        local link = CreateFrame("Frame", nil, row, "InlineHyperlinkFrameTemplate")
         row.FriendLink = link
         link:Hide()
         link:SetAllPoints()
+        link:EnableMouse(true)
+        link:SetPassThroughButtons("LeftButton", "Button3", "Button4", "Button5")
         link:SetClipsChildren(true)
         link:SetScript("OnHyperlinkEnter", nil)
         link:SetScript("OnHyperlinkLeave", nil)
@@ -835,6 +837,19 @@ local function CreateFriendsView(socialFrame, nativeView)
             collapsed[key] = not IsSectionCollapsed(key, GetPlayerRuleset())
             Render(groups)
         end)
+        if key == "unknown" then
+            header:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetText("Unknown ruleset")
+                GameTooltip:AddLine("These friends are playing WoW: Forever, but their ruleset could not be identified from the available game data.", 1, 1, 1, true)
+                GameTooltip:AddLine("The addon checks realm names, game presence, fresh account data, and matching realm IDs.", 1, 1, 1, true)
+                GameTooltip:AddLine("Type /bfl rulesets with this list open to inspect the missing data.", 1, 0.82, 0, true)
+                GameTooltip:Show()
+            end)
+            header:SetScript("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+        end
         headers[key] = header
     end
 
